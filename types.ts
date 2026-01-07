@@ -3,6 +3,7 @@ export type ExpenseType = 'Köprü' | 'Gemi' | 'Yakıt' | 'Diğer';
 
 export interface Job {
   id: string;
+  company: string;
   from: string;
   to: string;
   amount: number;
@@ -13,6 +14,7 @@ export interface Job {
 
 export interface ScheduledJob {
   id: string;
+  company: string;
   passengerName: string;
   from: string;
   to: string;
