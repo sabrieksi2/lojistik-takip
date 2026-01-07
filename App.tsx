@@ -52,6 +52,7 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [isCloudActive, setIsCloudActive] = useState(false);
+  const [syncFlash, setSyncFlash] = useState(false);
 
   // Main Data States
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -59,8 +60,8 @@ const App: React.FC = () => {
   const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
-  // Refs for checking initial loads
   const isFirstRender = useRef(true);
+  const supabaseRef = useRef<any>(null);
 
   // Pull from Cloud Function
   const pullFromCloud = useCallback(async (config = dbConfig) => {
@@ -71,19 +72,22 @@ const App: React.FC = () => {
       const { data, error } = await supabase
         .from('logistics_db')
         .select('data')
-        .eq('id', 1)
-        .single();
+        .eq('id', 1);
 
       if (error) throw error;
 
-      if (data?.data) {
-        const cloudData = data.data;
+      if (data && data.length > 0 && data[0].data) {
+        const cloudData = data[0].data;
         setJobs(cloudData.jobs || []);
         setScheduledJobs(cloudData.scheduledJobs || []);
         setFinishedJobs(cloudData.finishedJobs || []);
         setExpenses(cloudData.expenses || []);
         setLastSync(new Date().toLocaleTimeString('tr-TR'));
         setIsCloudActive(true);
+        
+        // Visual indicator that data updated
+        setSyncFlash(true);
+        setTimeout(() => setSyncFlash(false), 2000);
       }
     } catch (e) {
       console.error("Bulut verisi çekilemedi:", e);
@@ -93,6 +97,30 @@ const App: React.FC = () => {
     }
   }, [dbConfig]);
 
+  // Setup Realtime Subscription
+  useEffect(() => {
+    if (dbConfig.url && dbConfig.key) {
+      const supabase = createClient(dbConfig.url, dbConfig.key);
+      supabaseRef.current = supabase;
+
+      const channel = supabase
+        .channel('db-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'logistics_db' },
+          (payload) => {
+            console.log('Bulut değişikliği algılandı, güncelleniyor...');
+            pullFromCloud();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [dbConfig, pullFromCloud]);
+
   // Push to Cloud Function
   const pushToCloud = useCallback(async (currentData: any) => {
     if (!dbConfig.url || !dbConfig.key) return;
@@ -101,7 +129,7 @@ const App: React.FC = () => {
       const supabase = createClient(dbConfig.url, dbConfig.key);
       const { error } = await supabase
         .from('logistics_db')
-        .upsert({ id: 1, data: currentData });
+        .upsert({ id: 1, data: currentData }, { onConflict: 'id' });
 
       if (error) throw error;
       setLastSync(new Date().toLocaleTimeString('tr-TR'));
@@ -114,9 +142,8 @@ const App: React.FC = () => {
     }
   }, [dbConfig]);
 
-  // Initial Data Load (LocalStorage -> Cloud)
+  // Initial Data Load
   useEffect(() => {
-    // 1. Önce yerel hafızayı yükle (hızlı açılış için)
     const sJobs = localStorage.getItem('logistics_jobs');
     const sScheduled = localStorage.getItem('logistics_scheduled');
     const sFinished = localStorage.getItem('logistics_finished');
@@ -127,13 +154,12 @@ const App: React.FC = () => {
     if (sFinished) setFinishedJobs(JSON.parse(sFinished));
     if (sExpenses) setExpenses(JSON.parse(sExpenses));
 
-    // 2. Eğer bulut ayarı varsa veriyi çek (güncellik için)
     if (dbConfig.url && dbConfig.key) {
       pullFromCloud();
     }
-  }, []); // Sadece açılışta bir kez
+  }, []);
 
-  // Sync to LocalStorage whenever state changes
+  // Sync to LocalStorage
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -284,17 +310,17 @@ const App: React.FC = () => {
       />
 
       {/* Database Setup Header / Indicator */}
-      <div className={`text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner transition-colors ${isCloudActive ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
+      <div className={`text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner transition-all duration-500 ${isCloudActive ? (syncFlash ? 'bg-amber-500 scale-[1.01]' : 'bg-emerald-600') : 'bg-indigo-600'}`}>
         <div className="flex items-center gap-2">
-          {isCloudActive ? <Cloud size={14} /> : <CloudOff size={14} className="opacity-50" />}
-          {isCloudActive ? "Bulut Senkronizasyonu Aktif" : "Sadece Cihazda Saklanıyor (Hafıza Riskli)"}
+          {isCloudActive ? <Cloud size={14} className={isSyncing ? 'animate-pulse' : ''} /> : <CloudOff size={14} className="opacity-50" />}
+          {isCloudActive ? (syncFlash ? "Veriler Senkronize Edildi!" : "Bulut Bağlantısı Canlı") : "Sadece Yerel Hafıza Aktif"}
         </div>
         <div className="flex items-center gap-4">
           {lastSync && <span>Son Senk: {lastSync}</span>}
           {dbConfig.url && (
             <button onClick={() => pullFromCloud()} disabled={isSyncing} className="flex items-center gap-1 hover:text-indigo-200 transition-colors">
               <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-              Şimdi Yenile
+              Yenile
             </button>
           )}
         </div>
@@ -467,7 +493,6 @@ const App: React.FC = () => {
             onDbConfigChange={(config) => {
               setDbConfig(config);
               localStorage.setItem('logistics_db_config', JSON.stringify(config));
-              // New config added, try to pull immediately
               pullFromCloud(config);
             }}
             dbConfig={dbConfig}
