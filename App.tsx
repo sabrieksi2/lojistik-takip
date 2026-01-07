@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   LayoutDashboard, 
   CalendarClock, 
@@ -48,8 +48,10 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('logistics_db_config');
     return saved ? JSON.parse(saved) : { url: '', key: '' };
   });
+  
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [isCloudActive, setIsCloudActive] = useState(false);
 
   // Main Data States
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -57,8 +59,64 @@ const App: React.FC = () => {
   const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
-  // Initial Data Load (LocalStorage fallback)
+  // Refs for checking initial loads
+  const isFirstRender = useRef(true);
+
+  // Pull from Cloud Function
+  const pullFromCloud = useCallback(async (config = dbConfig) => {
+    if (!config.url || !config.key) return;
+    setIsSyncing(true);
+    try {
+      const supabase = createClient(config.url, config.key);
+      const { data, error } = await supabase
+        .from('logistics_db')
+        .select('data')
+        .eq('id', 1)
+        .single();
+
+      if (error) throw error;
+
+      if (data?.data) {
+        const cloudData = data.data;
+        setJobs(cloudData.jobs || []);
+        setScheduledJobs(cloudData.scheduledJobs || []);
+        setFinishedJobs(cloudData.finishedJobs || []);
+        setExpenses(cloudData.expenses || []);
+        setLastSync(new Date().toLocaleTimeString('tr-TR'));
+        setIsCloudActive(true);
+      }
+    } catch (e) {
+      console.error("Bulut verisi çekilemedi:", e);
+      setIsCloudActive(false);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [dbConfig]);
+
+  // Push to Cloud Function
+  const pushToCloud = useCallback(async (currentData: any) => {
+    if (!dbConfig.url || !dbConfig.key) return;
+    setIsSyncing(true);
+    try {
+      const supabase = createClient(dbConfig.url, dbConfig.key);
+      const { error } = await supabase
+        .from('logistics_db')
+        .upsert({ id: 1, data: currentData });
+
+      if (error) throw error;
+      setLastSync(new Date().toLocaleTimeString('tr-TR'));
+      setIsCloudActive(true);
+    } catch (e) {
+      console.error("Bulut senkronizasyonu hatası:", e);
+      setIsCloudActive(false);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [dbConfig]);
+
+  // Initial Data Load (LocalStorage -> Cloud)
   useEffect(() => {
+    // 1. Önce yerel hafızayı yükle (hızlı açılış için)
     const sJobs = localStorage.getItem('logistics_jobs');
     const sScheduled = localStorage.getItem('logistics_scheduled');
     const sFinished = localStorage.getItem('logistics_finished');
@@ -68,57 +126,19 @@ const App: React.FC = () => {
     if (sScheduled) setScheduledJobs(JSON.parse(sScheduled));
     if (sFinished) setFinishedJobs(JSON.parse(sFinished));
     if (sExpenses) setExpenses(JSON.parse(sExpenses));
-  }, []);
 
-  // Sync to Cloud
-  const syncToCloud = useCallback(async (dataOverride?: any) => {
-    if (!dbConfig.url || !dbConfig.key) return;
-    setIsSyncing(true);
-    try {
-      const supabase = createClient(dbConfig.url, dbConfig.key);
-      const dataToSync = dataOverride || { jobs, scheduledJobs, finishedJobs, expenses };
-      
-      const { error } = await supabase
-        .from('logistics_db')
-        .upsert({ id: 1, data: dataToSync });
-
-      if (!error) setLastSync(new Date().toLocaleTimeString('tr-TR'));
-    } catch (e) {
-      console.error("Cloud sync failed", e);
-    } finally {
-      setIsSyncing(false);
+    // 2. Eğer bulut ayarı varsa veriyi çek (güncellik için)
+    if (dbConfig.url && dbConfig.key) {
+      pullFromCloud();
     }
-  }, [dbConfig, jobs, scheduledJobs, finishedJobs, expenses]);
+  }, []); // Sadece açılışta bir kez
 
-  // Pull from Cloud
-  const pullFromCloud = useCallback(async () => {
-    if (!dbConfig.url || !dbConfig.key) return;
-    setIsSyncing(true);
-    try {
-      const supabase = createClient(dbConfig.url, dbConfig.key);
-      const { data, error } = await supabase
-        .from('logistics_db')
-        .select('data')
-        .eq('id', 1)
-        .single();
-
-      if (!error && data?.data) {
-        const cloudData = data.data;
-        setJobs(cloudData.jobs || []);
-        setScheduledJobs(cloudData.scheduledJobs || []);
-        setFinishedJobs(cloudData.finishedJobs || []);
-        setExpenses(cloudData.expenses || []);
-        setLastSync(new Date().toLocaleTimeString('tr-TR'));
-      }
-    } catch (e) {
-      console.error("Cloud pull failed", e);
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [dbConfig]);
-
-  // Periodic Auto-Sync to LocalStorage
+  // Sync to LocalStorage whenever state changes
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     localStorage.setItem('logistics_jobs', JSON.stringify(jobs));
     localStorage.setItem('logistics_scheduled', JSON.stringify(scheduledJobs));
     localStorage.setItem('logistics_finished', JSON.stringify(finishedJobs));
@@ -138,6 +158,16 @@ const App: React.FC = () => {
   });
 
   // Handlers
+  const triggerSync = (updatedJobs?: Job[], updatedScheduled?: ScheduledJob[], updatedFinished?: ScheduledJob[], updatedExpenses?: Expense[]) => {
+    const data = {
+      jobs: updatedJobs || jobs,
+      scheduledJobs: updatedScheduled || scheduledJobs,
+      finishedJobs: updatedFinished || finishedJobs,
+      expenses: updatedExpenses || expenses
+    };
+    pushToCloud(data);
+  };
+
   const addJob = (jobData: Omit<Job, 'id' | 'date' | 'timestamp'>, customDate?: string) => {
     const dateObj = customDate ? new Date(customDate + 'T12:00:00') : new Date();
     const newJob: Job = {
@@ -148,9 +178,9 @@ const App: React.FC = () => {
     };
     setJobs(prev => {
       const next = [newJob, ...prev].sort((a, b) => b.timestamp - a.timestamp);
+      triggerSync(next);
       return next;
     });
-    setTimeout(syncToCloud, 500); // Delay to ensure state is flushed
   };
 
   const addScheduledJob = (jobData: Omit<ScheduledJob, 'id'>) => {
@@ -159,9 +189,9 @@ const App: React.FC = () => {
       const next = [...prev, newJob].sort((a, b) => {
         return new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime();
       });
+      triggerSync(undefined, next);
       return next;
     });
-    setTimeout(syncToCloud, 500);
   };
 
   const handleConfirmArrivalAction = (job: ScheduledJob) => {
@@ -182,10 +212,16 @@ const App: React.FC = () => {
           timestamp: Date.now(),
           isAutoGenerated: true
         };
-        setJobs(prev => [newDailyJob, ...prev].sort((a, b) => b.timestamp - a.timestamp));
-        setFinishedJobs(prev => [job, ...prev]);
-        setScheduledJobs(prev => prev.filter(sj => sj.id !== job.id));
-        setTimeout(syncToCloud, 500);
+        
+        const nextJobs = [newDailyJob, ...jobs].sort((a, b) => b.timestamp - a.timestamp);
+        const nextFinished = [job, ...finishedJobs];
+        const nextScheduled = scheduledJobs.filter(sj => sj.id !== job.id);
+        
+        setJobs(nextJobs);
+        setFinishedJobs(nextFinished);
+        setScheduledJobs(nextScheduled);
+        
+        triggerSync(nextJobs, nextScheduled, nextFinished);
       }
     });
   };
@@ -198,8 +234,9 @@ const App: React.FC = () => {
       confirmText: 'Sil',
       type: 'danger',
       onConfirm: () => {
-        setScheduledJobs(prev => prev.filter(sj => sj.id !== job.id));
-        setTimeout(syncToCloud, 500);
+        const nextScheduled = scheduledJobs.filter(sj => sj.id !== job.id);
+        setScheduledJobs(nextScheduled);
+        triggerSync(undefined, nextScheduled);
       }
     });
   };
@@ -211,17 +248,27 @@ const App: React.FC = () => {
       id: Math.random().toString(36).substr(2, 9),
       date: dateObj.toISOString()
     }));
-    setExpenses(prev => [...mapped, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-    setTimeout(syncToCloud, 500);
+    setExpenses(prev => {
+      const next = [...mapped, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      triggerSync(undefined, undefined, undefined, next);
+      return next;
+    });
   };
 
   const deleteJob = (id: string) => {
-    setJobs(prev => prev.filter(j => j.id !== id));
-    setTimeout(syncToCloud, 500);
+    setJobs(prev => {
+      const next = prev.filter(j => j.id !== id);
+      triggerSync(next);
+      return next;
+    });
   };
+
   const deleteExpense = (id: string) => {
-    setExpenses(prev => prev.filter(e => e.id !== id));
-    setTimeout(syncToCloud, 500);
+    setExpenses(prev => {
+      const next = prev.filter(e => e.id !== id);
+      triggerSync(undefined, undefined, undefined, next);
+      return next;
+    });
   };
 
   return (
@@ -237,17 +284,17 @@ const App: React.FC = () => {
       />
 
       {/* Database Setup Header / Indicator */}
-      <div className="bg-indigo-600 text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner">
+      <div className={`text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner transition-colors ${isCloudActive ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
         <div className="flex items-center gap-2">
-          {dbConfig.url ? <Cloud size={14} /> : <CloudOff size={14} className="opacity-50" />}
-          {dbConfig.url ? "Bulut Senkronizasyonu Aktif" : "Sadece Cihazda Saklanıyor (Hafıza Riskli)"}
+          {isCloudActive ? <Cloud size={14} /> : <CloudOff size={14} className="opacity-50" />}
+          {isCloudActive ? "Bulut Senkronizasyonu Aktif" : "Sadece Cihazda Saklanıyor (Hafıza Riskli)"}
         </div>
         <div className="flex items-center gap-4">
           {lastSync && <span>Son Senk: {lastSync}</span>}
           {dbConfig.url && (
-            <button onClick={pullFromCloud} disabled={isSyncing} className="flex items-center gap-1 hover:text-indigo-200 transition-colors">
+            <button onClick={() => pullFromCloud()} disabled={isSyncing} className="flex items-center gap-1 hover:text-indigo-200 transition-colors">
               <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-              Yenile
+              Şimdi Yenile
             </button>
           )}
         </div>
@@ -420,9 +467,11 @@ const App: React.FC = () => {
             onDbConfigChange={(config) => {
               setDbConfig(config);
               localStorage.setItem('logistics_db_config', JSON.stringify(config));
+              // New config added, try to pull immediately
+              pullFromCloud(config);
             }}
             dbConfig={dbConfig}
-            onSyncRequest={pullFromCloud}
+            onSyncRequest={() => pullFromCloud()}
           />
         )}
       </main>
