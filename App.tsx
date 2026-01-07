@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   CalendarClock, 
@@ -15,8 +15,13 @@ import {
   History,
   CheckCircle,
   Lock,
-  Building2
+  Building2,
+  CalendarPlus,
+  Cloud,
+  CloudOff,
+  RefreshCw
 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType } from './types';
 
 // Components
@@ -26,9 +31,100 @@ import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 
+// Helper to check if a scheduled job's time has passed
+const isJobExpired = (date: string, time: string) => {
+  const jobDateTime = new Date(`${date}T${time}`);
+  return jobDateTime.getTime() < Date.now();
+};
+
 const App: React.FC = () => {
-  const [view, setView] = useState<'daily' | 'scheduled' | 'stats'>('daily');
+  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical'>('daily');
+  const [historicalDate, setHistoricalDate] = useState<string>(
+    new Date(Date.now() - 86400000).toISOString().split('T')[0]
+  );
   
+  // Supabase Config
+  const [dbConfig, setDbConfig] = useState<{ url: string; key: string }>(() => {
+    const saved = localStorage.getItem('logistics_db_config');
+    return saved ? JSON.parse(saved) : { url: '', key: '' };
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+
+  // Main Data States
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
+  const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+
+  // Initial Data Load (LocalStorage fallback)
+  useEffect(() => {
+    const sJobs = localStorage.getItem('logistics_jobs');
+    const sScheduled = localStorage.getItem('logistics_scheduled');
+    const sFinished = localStorage.getItem('logistics_finished');
+    const sExpenses = localStorage.getItem('logistics_expenses');
+    
+    if (sJobs) setJobs(JSON.parse(sJobs));
+    if (sScheduled) setScheduledJobs(JSON.parse(sScheduled));
+    if (sFinished) setFinishedJobs(JSON.parse(sFinished));
+    if (sExpenses) setExpenses(JSON.parse(sExpenses));
+  }, []);
+
+  // Sync to Cloud
+  const syncToCloud = useCallback(async (dataOverride?: any) => {
+    if (!dbConfig.url || !dbConfig.key) return;
+    setIsSyncing(true);
+    try {
+      const supabase = createClient(dbConfig.url, dbConfig.key);
+      const dataToSync = dataOverride || { jobs, scheduledJobs, finishedJobs, expenses };
+      
+      const { error } = await supabase
+        .from('logistics_db')
+        .upsert({ id: 1, data: dataToSync });
+
+      if (!error) setLastSync(new Date().toLocaleTimeString('tr-TR'));
+    } catch (e) {
+      console.error("Cloud sync failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [dbConfig, jobs, scheduledJobs, finishedJobs, expenses]);
+
+  // Pull from Cloud
+  const pullFromCloud = useCallback(async () => {
+    if (!dbConfig.url || !dbConfig.key) return;
+    setIsSyncing(true);
+    try {
+      const supabase = createClient(dbConfig.url, dbConfig.key);
+      const { data, error } = await supabase
+        .from('logistics_db')
+        .select('data')
+        .eq('id', 1)
+        .single();
+
+      if (!error && data?.data) {
+        const cloudData = data.data;
+        setJobs(cloudData.jobs || []);
+        setScheduledJobs(cloudData.scheduledJobs || []);
+        setFinishedJobs(cloudData.finishedJobs || []);
+        setExpenses(cloudData.expenses || []);
+        setLastSync(new Date().toLocaleTimeString('tr-TR'));
+      }
+    } catch (e) {
+      console.error("Cloud pull failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [dbConfig]);
+
+  // Periodic Auto-Sync to LocalStorage
+  useEffect(() => {
+    localStorage.setItem('logistics_jobs', JSON.stringify(jobs));
+    localStorage.setItem('logistics_scheduled', JSON.stringify(scheduledJobs));
+    localStorage.setItem('logistics_finished', JSON.stringify(finishedJobs));
+    localStorage.setItem('logistics_expenses', JSON.stringify(expenses));
+  }, [jobs, scheduledJobs, finishedJobs, expenses]);
+
   // Modal State
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -38,69 +134,41 @@ const App: React.FC = () => {
     type: 'danger' | 'success' | 'info';
     onConfirm: () => void;
   }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    confirmText: '',
-    type: 'info',
-    onConfirm: () => {}
+    isOpen: false, title: '', message: '', confirmText: '', type: 'info', onConfirm: () => {}
   });
-
-  // State from LocalStorage
-  const [jobs, setJobs] = useState<Job[]>(() => {
-    const saved = localStorage.getItem('logistics_jobs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>(() => {
-    const saved = localStorage.getItem('logistics_scheduled');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>(() => {
-    const saved = localStorage.getItem('logistics_finished');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [expenses, setExpenses] = useState<Expense[]>(() => {
-    const saved = localStorage.getItem('logistics_expenses');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  // Sync to LocalStorage
-  useEffect(() => localStorage.setItem('logistics_jobs', JSON.stringify(jobs)), [jobs]);
-  useEffect(() => localStorage.setItem('logistics_scheduled', JSON.stringify(scheduledJobs)), [scheduledJobs]);
-  useEffect(() => localStorage.setItem('logistics_finished', JSON.stringify(finishedJobs)), [finishedJobs]);
-  useEffect(() => localStorage.setItem('logistics_expenses', JSON.stringify(expenses)), [expenses]);
 
   // Handlers
-  const addJob = (jobData: Omit<Job, 'id' | 'date' | 'timestamp'>) => {
+  const addJob = (jobData: Omit<Job, 'id' | 'date' | 'timestamp'>, customDate?: string) => {
+    const dateObj = customDate ? new Date(customDate + 'T12:00:00') : new Date();
     const newJob: Job = {
       ...jobData,
       id: Math.random().toString(36).substr(2, 9),
-      date: new Date().toISOString(),
-      timestamp: Date.now()
+      date: dateObj.toISOString(),
+      timestamp: dateObj.getTime()
     };
-    setJobs(prev => [newJob, ...prev]);
+    setJobs(prev => {
+      const next = [newJob, ...prev].sort((a, b) => b.timestamp - a.timestamp);
+      return next;
+    });
+    setTimeout(syncToCloud, 500); // Delay to ensure state is flushed
   };
 
   const addScheduledJob = (jobData: Omit<ScheduledJob, 'id'>) => {
-    const newJob: ScheduledJob = {
-      ...jobData,
-      id: Math.random().toString(36).substr(2, 9)
-    };
-    setScheduledJobs(prev => [...prev, newJob].sort((a, b) => {
-      const dateTimeA = new Date(`${a.date}T${a.time}`).getTime();
-      const dateTimeB = new Date(`${b.date}T${b.time}`).getTime();
-      return dateTimeA - dateTimeB;
-    }));
+    const newJob: ScheduledJob = { ...jobData, id: Math.random().toString(36).substr(2, 9) };
+    setScheduledJobs(prev => {
+      const next = [...prev, newJob].sort((a, b) => {
+        return new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime();
+      });
+      return next;
+    });
+    setTimeout(syncToCloud, 500);
   };
 
   const handleConfirmArrivalAction = (job: ScheduledJob) => {
     setModalConfig({
       isOpen: true,
       title: 'Varış Onayla',
-      message: `${job.passengerName} isimli yolcunun yolculuğunun tamamlandığını onaylıyor musunuz? Bu işlem ${job.fee} TL tutarı kasanıza gelir olarak ekleyecektir.`,
+      message: `${job.passengerName} isimli yolcunun yolculuğunun tamamlandığını onaylıyor musunuz?`,
       confirmText: 'Onayla',
       type: 'success',
       onConfirm: () => {
@@ -114,9 +182,10 @@ const App: React.FC = () => {
           timestamp: Date.now(),
           isAutoGenerated: true
         };
-        setJobs(prev => [newDailyJob, ...prev]);
+        setJobs(prev => [newDailyJob, ...prev].sort((a, b) => b.timestamp - a.timestamp));
         setFinishedJobs(prev => [job, ...prev]);
         setScheduledJobs(prev => prev.filter(sj => sj.id !== job.id));
+        setTimeout(syncToCloud, 500);
       }
     });
   };
@@ -125,61 +194,38 @@ const App: React.FC = () => {
     setModalConfig({
       isOpen: true,
       title: 'İşi Sil',
-      message: `${job.passengerName} isimli yolcu için planlanan bu işi silmek istediğinize emin misiniz?`,
+      message: `${job.passengerName} işini silmek istediğinize emin misiniz?`,
       confirmText: 'Sil',
       type: 'danger',
       onConfirm: () => {
         setScheduledJobs(prev => prev.filter(sj => sj.id !== job.id));
+        setTimeout(syncToCloud, 500);
       }
     });
   };
 
-  const addExpenses = (newExpenses: { type: ExpenseType; amount: number }[]) => {
-    const filtered = newExpenses.filter(e => e.amount > 0);
-    const mapped: Expense[] = filtered.map(e => ({
+  const addExpenses = (newExpenses: { type: ExpenseType; amount: number }[], customDate?: string) => {
+    const dateObj = customDate ? new Date(customDate + 'T12:00:00') : new Date();
+    const mapped: Expense[] = newExpenses.filter(e => e.amount > 0).map(e => ({
       ...e,
       id: Math.random().toString(36).substr(2, 9),
-      date: new Date().toISOString()
+      date: dateObj.toISOString()
     }));
-    setExpenses(prev => [...mapped, ...prev]);
+    setExpenses(prev => [...mapped, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setTimeout(syncToCloud, 500);
   };
 
-  const deleteJob = (id: string) => setJobs(prev => prev.filter(j => j.id !== id));
-  const deleteExpense = (id: string) => setExpenses(prev => prev.filter(e => e.id !== id));
-  const clearFinished = () => {
-    setModalConfig({
-      isOpen: true,
-      title: 'Arşivi Temizle',
-      message: 'Tüm biten iş geçmişini silmek üzeresiniz. Bu işlem geri alınamaz.',
-      confirmText: 'Temizle',
-      type: 'danger',
-      onConfirm: () => setFinishedJobs([])
-    });
+  const deleteJob = (id: string) => {
+    setJobs(prev => prev.filter(j => j.id !== id));
+    setTimeout(syncToCloud, 500);
   };
-
-  const getRemainingTime = (date: string, time: string) => {
-    const target = new Date(`${date}T${time}`).getTime();
-    const now = new Date().getTime();
-    const diff = target - now;
-
-    if (diff < 0) return "Süresi Doldu";
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days} gün ${hours % 24} sa`;
-    if (hours > 0) return `${hours} sa ${minutes} dk`;
-    return `${minutes} dk kaldı`;
-  };
-
-  const isJobExpired = (date: string, time: string) => {
-    const target = new Date(`${date}T${time}`).getTime();
-    return Date.now() >= target;
+  const deleteExpense = (id: string) => {
+    setExpenses(prev => prev.filter(e => e.id !== id));
+    setTimeout(syncToCloud, 500);
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 pb-20 md:pb-0 text-slate-100">
+    <div className="min-h-screen bg-slate-50 pb-20 md:pb-0 text-slate-900">
       <ConfirmationModal 
         isOpen={modalConfig.isOpen}
         onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
@@ -190,86 +236,131 @@ const App: React.FC = () => {
         type={modalConfig.type}
       />
 
-      <nav className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 flex justify-around p-3 md:top-0 md:bottom-auto md:justify-start md:px-8 md:gap-8 z-50 shadow-2xl">
-        <button onClick={() => setView('daily')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all ${view === 'daily' ? 'bg-indigo-900/40 text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>
+      {/* Database Setup Header / Indicator */}
+      <div className="bg-indigo-600 text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner">
+        <div className="flex items-center gap-2">
+          {dbConfig.url ? <Cloud size={14} /> : <CloudOff size={14} className="opacity-50" />}
+          {dbConfig.url ? "Bulut Senkronizasyonu Aktif" : "Sadece Cihazda Saklanıyor (Hafıza Riskli)"}
+        </div>
+        <div className="flex items-center gap-4">
+          {lastSync && <span>Son Senk: {lastSync}</span>}
+          {dbConfig.url && (
+            <button onClick={pullFromCloud} disabled={isSyncing} className="flex items-center gap-1 hover:text-indigo-200 transition-colors">
+              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
+              Yenile
+            </button>
+          )}
+        </div>
+      </div>
+
+      <nav className="fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 flex justify-around p-3 md:top-6 md:bottom-auto md:justify-start md:px-8 md:gap-4 lg:gap-8 z-50 shadow-lg overflow-x-auto no-scrollbar">
+        <button onClick={() => setView('daily')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'daily' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
           <LayoutDashboard size={20} />
-          <span className="text-xs md:text-sm font-semibold">Günlük İşler</span>
+          <span className="text-[10px] md:text-sm font-semibold">Günlük</span>
         </button>
-        <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all ${view === 'scheduled' ? 'bg-indigo-900/40 text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>
+        <button onClick={() => setView('historical')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'historical' ? 'bg-amber-50 text-amber-600' : 'text-slate-500 hover:text-slate-800'}`}>
+          <CalendarPlus size={20} />
+          <span className="text-[10px] md:text-sm font-semibold">Geçmiş</span>
+        </button>
+        <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'scheduled' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
           <CalendarClock size={20} />
-          <span className="text-xs md:text-sm font-semibold">İleri Tarihli</span>
+          <span className="text-[10px] md:text-sm font-semibold">İleri Tarih</span>
         </button>
-        <button onClick={() => setView('stats')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all ${view === 'stats' ? 'bg-indigo-900/40 text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>
+        <button onClick={() => setView('stats')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'stats' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
           <Wallet size={20} />
-          <span className="text-xs md:text-sm font-semibold">Ciro & Analiz</span>
+          <span className="text-[10px] md:text-sm font-semibold">Analiz</span>
         </button>
       </nav>
 
-      <main className="max-w-6xl mx-auto px-4 pt-4 md:pt-24 pb-8">
-        {view === 'daily' && (
+      <main className="max-w-6xl mx-auto px-4 pt-4 md:pt-32 pb-8">
+        {(view === 'daily' || view === 'historical') && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-4 space-y-6">
-              <JobForm onAdd={addJob} />
-              <ExpenseForm onAdd={addExpenses} />
+              {view === 'historical' && (
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-200">
+                  <h3 className="text-lg font-bold text-amber-700 mb-4 flex items-center gap-2">
+                    <History size={20} className="text-amber-600" />
+                    Tarih Seç
+                  </h3>
+                  <input 
+                    type="date" 
+                    value={historicalDate}
+                    onChange={(e) => setHistoricalDate(e.target.value)}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all font-bold text-slate-700"
+                  />
+                </div>
+              )}
+              <JobForm 
+                onAdd={(data) => addJob(data, view === 'historical' ? historicalDate : undefined)} 
+                title={view === 'historical' ? "Geçmiş İş Girişi" : "Günlük İş Girişi"}
+              />
+              <ExpenseForm 
+                onAdd={(data) => addExpenses(data, view === 'historical' ? historicalDate : undefined)} 
+                title={view === 'historical' ? "Geçmiş Giderler" : "Günlük Giderler"}
+              />
             </div>
             <div className="lg:col-span-8">
-              <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
-                <div className="p-4 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center">
-                  <h2 className="font-bold text-slate-100 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-emerald-500" />
-                    Bugünkü Hareketler
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                  <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                    <TrendingUp size={18} className={view === 'historical' ? "text-amber-600" : "text-emerald-600"} />
+                    {view === 'historical' ? `${historicalDate} Kayıtları` : "Bugünkü Hareketler"}
                   </h2>
                 </div>
-                <div className="divide-y divide-slate-800 max-h-[600px] overflow-y-auto">
-                  {jobs.length === 0 && expenses.length === 0 ? (
-                    <div className="p-12 text-center text-slate-600">Henüz bir hareket girilmedi.</div>
-                  ) : (
-                    <>
-                      {jobs.map(job => (
-                        <div key={job.id} className="p-4 flex justify-between items-center hover:bg-slate-800/50 transition-colors">
-                          <div className="flex gap-4 items-center">
-                            <div className={`p-2 rounded-lg ${job.isAutoGenerated ? 'bg-emerald-900/30 text-emerald-400' : 'bg-indigo-900/30 text-indigo-400'}`}>
-                              {job.isAutoGenerated ? <CheckCircle2 size={18} /> : <ArrowRightLeft size={18} />}
-                            </div>
-                            <div>
-                              <div className="font-medium text-slate-100">{job.from} → {job.to}</div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <span className="flex items-center gap-1"><Building2 size={10} /> {job.company}</span>
-                                <span>•</span>
-                                <span>{new Date(job.date).toLocaleTimeString('tr-TR')}</span>
-                                {job.isAutoGenerated && <span className="text-emerald-600 ml-1">(Planlı)</span>}
+                <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                  {(() => {
+                    const targetDate = view === 'historical' ? historicalDate : new Date().toISOString().split('T')[0];
+                    const fJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === targetDate);
+                    const fExpenses = expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === targetDate);
+
+                    if (fJobs.length === 0 && fExpenses.length === 0) {
+                      return <div className="p-12 text-center text-slate-400 font-medium">Bu tarih için kayıt bulunmuyor.</div>;
+                    }
+
+                    return (
+                      <>
+                        {fJobs.map(job => (
+                          <div key={job.id} className="p-4 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                            <div className="flex gap-4 items-center">
+                              <div className={`p-2 rounded-lg ${job.isAutoGenerated ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                {job.isAutoGenerated ? <CheckCircle2 size={18} /> : <ArrowRightLeft size={18} />}
+                              </div>
+                              <div>
+                                <div className="font-bold text-slate-900">{job.from} → {job.to}</div>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                  <span><Building2 size={10} className="inline mr-1"/>{job.company}</span>
+                                  <span>• {new Date(job.date).toLocaleTimeString('tr-TR')}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="font-bold text-emerald-400">+{job.amount.toLocaleString('tr-TR')} ₺</div>
-                            <button onClick={() => deleteJob(job.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors">
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {expenses.map(expense => (
-                        <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-slate-800/50 transition-colors">
-                          <div className="flex gap-4 items-center">
-                            <div className="p-2 bg-red-900/30 text-red-400 rounded-lg">
-                              <Fuel size={18} />
-                            </div>
-                            <div>
-                              <div className="font-medium text-slate-100">{expense.type} Gideri</div>
-                              <div className="text-xs text-slate-500">{new Date(expense.date).toLocaleTimeString('tr-TR')}</div>
+                            <div className="flex items-center gap-4">
+                              <div className="font-black text-emerald-600">+{job.amount.toLocaleString('tr-TR')} ₺</div>
+                              <button onClick={() => deleteJob(job.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                                <Trash2 size={16} />
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <div className="font-bold text-red-400">-{expense.amount.toLocaleString('tr-TR')} ₺</div>
-                            <button onClick={() => deleteExpense(expense.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors">
-                              <Trash2 size={16} />
-                            </button>
+                        ))}
+                        {fExpenses.map(expense => (
+                          <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                            <div className="flex gap-4 items-center">
+                              <div className="p-2 bg-red-50 text-red-600 rounded-lg"><Fuel size={18} /></div>
+                              <div>
+                                <div className="font-bold text-slate-900">{expense.type} Gideri</div>
+                                <div className="text-xs text-slate-500 font-medium">{new Date(expense.date).toLocaleTimeString('tr-TR')}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="font-black text-red-600">-{expense.amount.toLocaleString('tr-TR')} ₺</div>
+                              <button onClick={() => deleteExpense(expense.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </>
-                  )}
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -281,106 +372,58 @@ const App: React.FC = () => {
             <div className="lg:col-span-4">
               <ScheduledJobForm onAdd={addScheduledJob} />
             </div>
-            <div className="lg:col-span-8 space-y-8">
-              <section className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-slate-100">Yaklaşan İşler</h2>
-                  <span className="bg-indigo-900/40 text-indigo-400 text-xs font-bold px-2 py-1 rounded-full border border-indigo-500/30">{scheduledJobs.length} Kayıt</span>
-                </div>
-                {scheduledJobs.length === 0 ? (
-                  <div className="bg-slate-900 rounded-2xl p-12 text-center border border-dashed border-slate-800 text-slate-600">Planlanmış bir iş bulunmuyor.</div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4">
-                    {scheduledJobs.map(job => {
-                      const expired = isJobExpired(job.date, job.time);
-                      return (
-                        <div key={job.id} className="bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          <div className="flex items-start gap-4">
-                            <div className="flex flex-col items-center justify-center bg-indigo-900/20 p-3 rounded-xl min-w-[70px] border border-indigo-500/20">
-                              <span className="text-xs font-bold text-indigo-500 uppercase">{new Date(job.date).toLocaleDateString('tr-TR', { month: 'short' })}</span>
-                              <span className="text-2xl font-black text-indigo-400">{new Date(job.date).getDate()}</span>
-                            </div>
-                            <div>
-                              <div className="flex flex-col gap-0.5 mb-2">
-                                <div className="flex items-center gap-2">
-                                  <User size={16} className="text-slate-500" />
-                                  <span className="font-bold text-slate-100">{job.passengerName}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5 text-xs text-indigo-400 font-medium">
-                                  <Building2 size={12} />
-                                  <span>{job.company}</span>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm text-slate-400">
-                                <MapPin size={14} className="text-indigo-500" />
-                                <span>{job.from} → {job.to}</span>
-                              </div>
-                              <div className="flex items-center gap-4 text-sm mt-2">
-                                  <span className="flex items-center gap-1 text-slate-500"><Clock size={14} /> {job.time}</span>
-                                  <span className={`font-bold px-2 py-0.5 rounded text-xs ${expired ? 'text-red-400 bg-red-900/20' : 'text-amber-400 bg-amber-900/20'}`}>
-                                    {getRemainingTime(job.date, job.time)}
-                                  </span>
-                              </div>
-                            </div>
+            <div className="lg:col-span-8">
+              <h2 className="text-xl font-bold text-slate-800 mb-4">Yaklaşan İşler</h2>
+              {scheduledJobs.length === 0 ? (
+                <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-300 text-slate-400 font-medium">Planlanmış iş yok.</div>
+              ) : (
+                <div className="space-y-4">
+                  {scheduledJobs.map(job => (
+                    <div key={job.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-start gap-4">
+                        <div className="flex flex-col items-center justify-center bg-indigo-50 p-3 rounded-xl min-w-[70px] border border-indigo-100">
+                          <span className="text-xs font-bold text-indigo-400 uppercase">{new Date(job.date).toLocaleDateString('tr-TR', { month: 'short' })}</span>
+                          <span className="text-2xl font-black text-indigo-700">{new Date(job.date).getDate()}</span>
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900 mb-1">{job.passengerName} <span className="text-xs text-indigo-600 font-bold">({job.company})</span></div>
+                          <div className="flex items-center gap-2 text-sm text-slate-600 font-medium">
+                            <MapPin size={14} className="text-indigo-500" />
+                            <span>{job.from} → {job.to}</span>
                           </div>
-                          <div className="flex items-center justify-between md:flex-col md:items-end gap-3 border-t md:border-t-0 pt-3 md:pt-0 border-slate-800">
-                            <div className="text-xl font-black text-emerald-400">{job.fee.toLocaleString('tr-TR')} ₺</div>
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => handleConfirmArrivalAction(job)}
-                                disabled={!expired}
-                                className={`flex items-center gap-1 text-white text-xs font-bold px-3 py-2 rounded-lg transition-all shadow-sm 
-                                  ${expired 
-                                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-900/40 cursor-pointer' 
-                                    : 'bg-slate-800 text-slate-500 cursor-not-allowed grayscale'}`}
-                                title={!expired ? "Bu buton sadece iş saati geldiğinde aktif olur." : ""}
-                              >
-                                {expired ? <CheckCircle size={14} /> : <Lock size={14} />} 
-                                Varış Onayla
-                              </button>
-                              <button 
-                                onClick={() => handleDeleteScheduledJobAction(job)} 
-                                className="p-2 text-slate-600 hover:text-red-500 transition-colors"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
+                          <div className="flex items-center gap-3 mt-2 text-xs font-bold text-slate-400">
+                             <span className="flex items-center gap-1"><Clock size={12}/> {job.time}</span>
+                             {isJobExpired(job.date, job.time) && <span className="text-red-500 bg-red-50 px-1.5 rounded">Zamanı Geldi</span>}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {finishedJobs.length > 0 && (
-                <section className="space-y-4 pt-4 border-t border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-bold text-slate-400 flex items-center gap-2">
-                      <History size={20} />
-                      Biten İşler (Arşiv)
-                    </h2>
-                    <button onClick={clearFinished} className="text-xs text-red-500 hover:underline">Temizle</button>
-                  </div>
-                  <div className="bg-slate-900 rounded-2xl border border-slate-800 divide-y divide-slate-800 opacity-60">
-                    {finishedJobs.map(job => (
-                      <div key={job.id} className="p-4 flex items-center justify-between">
-                        <div className="text-sm">
-                          <div className="font-bold text-slate-200">{job.passengerName} <span className="text-xs font-normal text-slate-500">({job.company})</span></div>
-                          <div className="text-slate-500">{job.from} → {job.to} | {job.date}</div>
-                        </div>
-                        <div className="font-bold text-slate-400">{job.fee.toLocaleString('tr-TR')} ₺</div>
                       </div>
-                    ))}
-                  </div>
-                </section>
+                      <div className="flex items-center justify-between md:flex-col md:items-end gap-3 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                        <div className="text-2xl font-black text-emerald-600">{job.fee.toLocaleString('tr-TR')} ₺</div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleConfirmArrivalAction(job)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm hover:bg-emerald-700">Tamamlandı</button>
+                          <button onClick={() => handleDeleteScheduledJobAction(job)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
         )}
 
         {view === 'stats' && (
-          <StatsOverview jobs={jobs} scheduledJobs={scheduledJobs} expenses={expenses} />
+          <StatsOverview 
+            jobs={jobs} 
+            expenses={expenses} 
+            scheduledJobs={scheduledJobs} 
+            onDbConfigChange={(config) => {
+              setDbConfig(config);
+              localStorage.setItem('logistics_db_config', JSON.stringify(config));
+            }}
+            dbConfig={dbConfig}
+            onSyncRequest={pullFromCloud}
+          />
         )}
       </main>
     </div>

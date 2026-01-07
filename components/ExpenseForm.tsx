@@ -5,9 +5,10 @@ import { ExpenseType } from '../types';
 
 interface ExpenseFormProps {
   onAdd: (expenses: { type: ExpenseType; amount: number }[]) => void;
+  title?: string;
 }
 
-const ExpenseForm: React.FC<ExpenseFormProps> = ({ onAdd }) => {
+const ExpenseForm: React.FC<ExpenseFormProps> = ({ onAdd, title = "Günlük Giderler" }) => {
   const [values, setValues] = useState<Record<ExpenseType, string>>({
     'Köprü': '0',
     'Gemi': '0',
@@ -37,16 +38,16 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ onAdd }) => {
   };
 
   return (
-    <div className="bg-red-900/20 p-6 rounded-2xl shadow-sm border border-red-500/30">
-      <h3 className="text-lg font-bold text-red-400 mb-4 flex items-center gap-2">
-        <Fuel size={20} className="text-red-500" />
-        Günlük Giderler
+    <div className="bg-red-50 p-6 rounded-2xl shadow-sm border border-red-100">
+      <h3 className="text-lg font-bold text-red-700 mb-4 flex items-center gap-2">
+        <Fuel size={20} className="text-red-600" />
+        {title}
       </h3>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           {(Object.keys(values) as ExpenseType[]).map(type => (
             <div key={type}>
-              <label className="block text-xs font-bold text-red-500/70 mb-1 uppercase tracking-wider flex items-center gap-1">
+              <label className="block text-xs font-bold text-red-700/70 mb-1 uppercase tracking-wider flex items-center gap-1">
                 {icons[type]} {type}
               </label>
               <div className="relative">
@@ -55,7 +56,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ onAdd }) => {
                   value={values[type]}
                   onChange={(e) => handleChange(type, e.target.value)}
                   placeholder="0"
-                  className="w-full pl-3 pr-4 py-2 bg-slate-900 border border-red-500/30 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none transition-all font-bold text-red-400"
+                  className="w-full pl-3 pr-4 py-2 bg-white border border-red-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none transition-all font-bold text-red-600"
                   required
                 />
               </div>
@@ -64,7 +65,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ onAdd }) => {
         </div>
         <button 
           type="submit"
-          className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-all active:scale-[0.98] shadow-md shadow-red-900/20"
+          className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-all active:scale-[0.98] shadow-md shadow-red-100"
         >
           Giderleri Kaydet
         </button>
