@@ -3,9 +3,9 @@ import React, { useMemo, useState } from 'react';
 import { Job, ScheduledJob, Expense, ExpenseType } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend
+  Legend
 } from 'recharts';
-import { DollarSign, Activity, PieChart as PieIcon, CalendarSearch, CalendarDays, Database, Save, HelpCircle } from 'lucide-react';
+import { DollarSign, CalendarSearch, CalendarDays, Database, Save, HelpCircle, Code, AlertCircle } from 'lucide-react';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -31,16 +31,9 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
       const ts = new Date(e.date).getTime();
       return ts >= startTime && (endTime ? ts <= endTime : true);
     });
-    
     const revenue = periodJobs.reduce((sum, j) => sum + j.amount, 0);
     const expenseTotal = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-    const breakdown: Record<ExpenseType, number> = { 'Köprü': 0, 'Gemi': 0, 'Yakıt': 0, 'Diğer': 0 };
-    periodExpenses.forEach(e => {
-      breakdown[e.type] += e.amount;
-    });
-
-    return { revenue, expenseTotal, profit: revenue - expenseTotal, breakdown };
+    return { revenue, expenseTotal, profit: revenue - expenseTotal };
   };
 
   const dailyBreakdown = useMemo(() => {
@@ -75,11 +68,24 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
     };
   }, [jobs, expenses, queryDate]);
 
-  const COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981'];
+  const sqlCode = `-- 1. Mevcut hatalı tabloyu silelim
+drop table if exists logistics_db;
+
+-- 2. Doğru tabloyu kuralım (created_at değil, DATA olmalı!)
+create table logistics_db (
+  id bigint primary key,
+  data jsonb not null default '{}'::jsonb
+);
+
+-- 3. İlk satırı oluşturalım
+insert into logistics_db (id, data) values (1, '{}'::jsonb);
+
+-- 4. Herkesin erişebilmesi için yetki verelim (RLS)
+alter table logistics_db enable row level security;
+create policy "Public Access" on logistics_db for all using (true) with check (true);`;
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Historical Query Section */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -94,7 +100,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
             className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-bold text-slate-700"
           />
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
           <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
             <div className="text-xs font-bold text-emerald-600 mb-1">Gelir</div>
@@ -111,7 +116,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
         </div>
       </div>
 
-      {/* Summaries */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Günlük Kar', data: stats.daily },
@@ -134,7 +138,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+        <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
           <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <CalendarDays size={18} className="text-indigo-600" />
             <h3 className="font-bold text-slate-800">Günlük İş Dağılımı</h3>
@@ -142,13 +146,12 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
           <div className="max-h-[400px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-slate-50 text-[10px] font-black text-slate-400 uppercase">
-                <tr><th className="px-4 py-2">Tarih</th><th className="px-4 py-2">Adet</th><th className="px-4 py-2 text-right">Gelir</th></tr>
+                <tr><th className="px-4 py-2">Tarih</th><th className="px-4 py-2 text-right">Gelir</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {dailyBreakdown.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-bold">{row.date}</td>
-                    <td className="px-4 py-3"><span className="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">{row.count} İş</span></td>
                     <td className="px-4 py-3 text-right font-black text-emerald-600">{row.revenue.toLocaleString('tr-TR')} ₺</td>
                   </tr>
                 ))}
@@ -156,87 +159,67 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
             </table>
           </div>
         </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[350px]">
-             <h3 className="font-bold text-slate-800 mb-6">Gelir/Gider Karşılaştırması</h3>
-             <div className="w-full h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { name: 'Günlük', gelir: stats.daily.revenue, gider: stats.daily.expenseTotal },
-                    { name: 'Haftalık', gelir: stats.weekly.revenue, gider: stats.weekly.expenseTotal },
-                    { name: 'Aylık', gelir: stats.monthly.revenue, gider: stats.monthly.expenseTotal },
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: '1px solid #e2e8f0'}} />
-                    <Legend />
-                    <Bar dataKey="gelir" name="Gelir" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="gider" name="Gider" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-             </div>
-          </div>
+        <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
+           <h3 className="font-bold text-slate-800 mb-6">Gelir/Gider Karşılaştırması</h3>
+           <div className="w-full h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[
+                  { name: 'Günlük', gelir: stats.daily.revenue, gider: stats.daily.expenseTotal },
+                  { name: 'Haftalık', gelir: stats.weekly.revenue, gider: stats.weekly.expenseTotal },
+                  { name: 'Aylık', gelir: stats.monthly.revenue, gider: stats.monthly.expenseTotal },
+                ]}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                  <Legend />
+                  <Bar dataKey="gelir" name="Gelir" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="gider" name="Gider" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+           </div>
         </div>
       </div>
 
-      {/* Database Settings Section */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <button 
-          onClick={() => setShowDbSettings(!showDbSettings)}
-          className="w-full p-4 bg-slate-50 hover:bg-slate-100 flex justify-between items-center transition-colors"
-        >
-          <div className="flex items-center gap-2 font-bold text-slate-700">
-            <Database size={18} className="text-indigo-600" />
-            Bulut Veritabanı Ayarları (Kalıcı Saklama)
-          </div>
+        <button onClick={() => setShowDbSettings(!showDbSettings)} className="w-full p-4 bg-slate-50 hover:bg-slate-100 flex justify-between items-center transition-colors">
+          <div className="flex items-center gap-2 font-bold text-slate-700"><Database size={18} className="text-indigo-600" />Bulut Veritabanı Ayarları</div>
           <span className="text-xs text-indigo-600 font-bold">{showDbSettings ? 'Kapat' : 'Yapılandır'}</span>
         </button>
         {showDbSettings && (
-          <div className="p-6 space-y-4 animate-in slide-in-from-top duration-300">
-            <div className="flex items-start gap-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
-              <HelpCircle className="text-amber-500 shrink-0" size={20} />
-              <p className="text-xs text-amber-800 font-medium">
-                Verilerinizin cihaz değiştirdiğinizde veya tarayıcıyı temizlediğinizde silinmemesi için ücretsiz bir <strong>Supabase</strong> projesi bağlayın. 
-                Supabase'de <strong>logistics_db</strong> adında, <strong>id</strong> ve <strong>data (jsonb)</strong> sütunları olan bir tablo oluşturmanız yeterlidir.
-              </p>
+          <div className="p-6 space-y-6 animate-in slide-in-from-top duration-300">
+            <div className="space-y-3">
+              <div className="flex items-start gap-4 p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <AlertCircle className="text-amber-600 shrink-0 mt-1" size={20} />
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-800 font-black">DİKKAT: Tabloyu Düzeltin!</p>
+                  <p className="text-[10px] text-amber-700 font-medium">Ekran görüntünde <b>created_at</b> isminde bir sütun gördüm. Uygulamanın çalışması için bu sütun isminin <b>data</b> olması gerekiyor.</p>
+                  <p className="text-[10px] text-amber-700 font-medium">Aşağıdaki kodu kopyalayıp Supabase SQL Editor'de çalıştırırsan her şey anında düzelir:</p>
+                  <div className="relative group">
+                    <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-[9px] overflow-x-auto whitespace-pre font-mono">
+                      {sqlCode}
+                    </pre>
+                    <button 
+                      onClick={() => { navigator.clipboard.writeText(sqlCode); alert("Kod kopyalandı!"); }}
+                      className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white p-1 rounded text-[8px]"
+                    >Kopyala</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Supabase Proje URL</label>
-                <input 
-                  type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)}
-                  placeholder="https://xyz.supabase.co"
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium text-xs"
-                />
+                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">URL</label>
+                <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="https://xyz.supabase.co" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Anon Public Key</label>
-                <input 
-                  type="password" value={tempKey} onChange={e => setTempKey(e.target.value)}
-                  placeholder="Supabase API Anahtarınız"
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium text-xs"
-                />
+                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Key</label>
+                <input type="password" value={tempKey} onChange={e => setTempKey(e.target.value)} placeholder="Supabase Anon Key" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
             </div>
             <div className="flex gap-3">
-               <button 
-                onClick={() => {
-                  onDbConfigChange({ url: tempUrl, key: tempKey });
-                  alert("Ayarlar kaydedildi! Sayfa yenilendiğinde bulut senkronizasyonu başlayacak.");
-                }}
-                className="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all"
-              >
-                <Save size={16} /> Ayarları Kaydet
-              </button>
-              <button 
-                onClick={onSyncRequest}
-                disabled={!dbConfig.url}
-                className="flex-1 border border-slate-200 font-bold py-2 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-all"
-              >
-                Buluttan Verileri Çek
-              </button>
+               <button onClick={() => { onDbConfigChange({ url: tempUrl, key: tempKey }); alert("Ayarlar kaydedildi!"); }} className="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-md active:scale-95"><Save size={16} /> Ayarları Kaydet</button>
+               <button onClick={onSyncRequest} className="flex-1 border border-slate-200 font-bold py-2 rounded-xl hover:bg-slate-50 active:scale-95">Verileri Şimdi Çek</button>
             </div>
           </div>
         )}

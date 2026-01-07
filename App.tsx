@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   LayoutDashboard, 
   CalendarClock, 
@@ -31,7 +31,6 @@ import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 
-// Helper to check if a scheduled job's time has passed
 const isJobExpired = (date: string, time: string) => {
   const jobDateTime = new Date(`${date}T${time}`);
   return jobDateTime.getTime() < Date.now();
@@ -43,7 +42,6 @@ const App: React.FC = () => {
     new Date(Date.now() - 86400000).toISOString().split('T')[0]
   );
   
-  // Supabase Config
   const [dbConfig, setDbConfig] = useState<{ url: string; key: string }>(() => {
     const saved = localStorage.getItem('logistics_db_config');
     return saved ? JSON.parse(saved) : { url: '', key: '' };
@@ -54,27 +52,36 @@ const App: React.FC = () => {
   const [isCloudActive, setIsCloudActive] = useState(false);
   const [syncFlash, setSyncFlash] = useState(false);
 
-  // Main Data States
   const [jobs, setJobs] = useState<Job[]>([]);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
   const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
   const isFirstRender = useRef(true);
-  const supabaseRef = useRef<any>(null);
 
-  // Pull from Cloud Function
-  const pullFromCloud = useCallback(async (config = dbConfig) => {
-    if (!config.url || !config.key) return;
+  // Singleton Supabase Client
+  const supabase = useMemo(() => {
+    if (dbConfig.url && dbConfig.key) {
+      return createClient(dbConfig.url, dbConfig.key);
+    }
+    return null;
+  }, [dbConfig.url, dbConfig.key]);
+
+  const pullFromCloud = useCallback(async () => {
+    if (!supabase) return;
     setIsSyncing(true);
     try {
-      const supabase = createClient(config.url, config.key);
       const { data, error } = await supabase
         .from('logistics_db')
         .select('data')
         .eq('id', 1);
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('column logistics_db.data does not exist')) {
+          alert("HATA: Supabase'de 'logistics_db' tablosunda 'data' (jsonb) sütunu eksik!");
+        }
+        throw error;
+      }
 
       if (data && data.length > 0 && data[0].data) {
         const cloudData = data[0].data;
@@ -84,8 +91,6 @@ const App: React.FC = () => {
         setExpenses(cloudData.expenses || []);
         setLastSync(new Date().toLocaleTimeString('tr-TR'));
         setIsCloudActive(true);
-        
-        // Visual indicator that data updated
         setSyncFlash(true);
         setTimeout(() => setSyncFlash(false), 2000);
       }
@@ -95,38 +100,26 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [dbConfig]);
+  }, [supabase]);
 
-  // Setup Realtime Subscription
   useEffect(() => {
-    if (dbConfig.url && dbConfig.key) {
-      const supabase = createClient(dbConfig.url, dbConfig.key);
-      supabaseRef.current = supabase;
-
+    if (supabase) {
       const channel = supabase
         .channel('db-changes')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'logistics_db' },
-          (payload) => {
-            console.log('Bulut değişikliği algılandı, güncelleniyor...');
-            pullFromCloud();
-          }
+          () => pullFromCloud()
         )
         .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      return () => { supabase.removeChannel(channel); };
     }
-  }, [dbConfig, pullFromCloud]);
+  }, [supabase, pullFromCloud]);
 
-  // Push to Cloud Function
   const pushToCloud = useCallback(async (currentData: any) => {
-    if (!dbConfig.url || !dbConfig.key) return;
+    if (!supabase) return;
     setIsSyncing(true);
     try {
-      const supabase = createClient(dbConfig.url, dbConfig.key);
       const { error } = await supabase
         .from('logistics_db')
         .upsert({ id: 1, data: currentData }, { onConflict: 'id' });
@@ -140,9 +133,8 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [dbConfig]);
+  }, [supabase]);
 
-  // Initial Data Load
   useEffect(() => {
     const sJobs = localStorage.getItem('logistics_jobs');
     const sScheduled = localStorage.getItem('logistics_scheduled');
@@ -154,12 +146,9 @@ const App: React.FC = () => {
     if (sFinished) setFinishedJobs(JSON.parse(sFinished));
     if (sExpenses) setExpenses(JSON.parse(sExpenses));
 
-    if (dbConfig.url && dbConfig.key) {
-      pullFromCloud();
-    }
-  }, []);
+    if (supabase) pullFromCloud();
+  }, [supabase, pullFromCloud]);
 
-  // Sync to LocalStorage
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -171,7 +160,6 @@ const App: React.FC = () => {
     localStorage.setItem('logistics_expenses', JSON.stringify(expenses));
   }, [jobs, scheduledJobs, finishedJobs, expenses]);
 
-  // Modal State
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -183,7 +171,6 @@ const App: React.FC = () => {
     isOpen: false, title: '', message: '', confirmText: '', type: 'info', onConfirm: () => {}
   });
 
-  // Handlers
   const triggerSync = (updatedJobs?: Job[], updatedScheduled?: ScheduledJob[], updatedFinished?: ScheduledJob[], updatedExpenses?: Expense[]) => {
     const data = {
       jobs: updatedJobs || jobs,
@@ -238,15 +225,12 @@ const App: React.FC = () => {
           timestamp: Date.now(),
           isAutoGenerated: true
         };
-        
         const nextJobs = [newDailyJob, ...jobs].sort((a, b) => b.timestamp - a.timestamp);
         const nextFinished = [job, ...finishedJobs];
         const nextScheduled = scheduledJobs.filter(sj => sj.id !== job.id);
-        
         setJobs(nextJobs);
         setFinishedJobs(nextFinished);
         setScheduledJobs(nextScheduled);
-        
         triggerSync(nextJobs, nextScheduled, nextFinished);
       }
     });
@@ -309,7 +293,6 @@ const App: React.FC = () => {
         type={modalConfig.type}
       />
 
-      {/* Database Setup Header / Indicator */}
       <div className={`text-white px-4 py-1.5 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-inner transition-all duration-500 ${isCloudActive ? (syncFlash ? 'bg-amber-500 scale-[1.01]' : 'bg-emerald-600') : 'bg-indigo-600'}`}>
         <div className="flex items-center gap-2">
           {isCloudActive ? <Cloud size={14} className={isSyncing ? 'animate-pulse' : ''} /> : <CloudOff size={14} className="opacity-50" />}
@@ -363,14 +346,8 @@ const App: React.FC = () => {
                   />
                 </div>
               )}
-              <JobForm 
-                onAdd={(data) => addJob(data, view === 'historical' ? historicalDate : undefined)} 
-                title={view === 'historical' ? "Geçmiş İş Girişi" : "Günlük İş Girişi"}
-              />
-              <ExpenseForm 
-                onAdd={(data) => addExpenses(data, view === 'historical' ? historicalDate : undefined)} 
-                title={view === 'historical' ? "Geçmiş Giderler" : "Günlük Giderler"}
-              />
+              <JobForm onAdd={(data) => addJob(data, view === 'historical' ? historicalDate : undefined)} title={view === 'historical' ? "Geçmiş İş Girişi" : "Günlük İş Girişi"} />
+              <ExpenseForm onAdd={(data) => addExpenses(data, view === 'historical' ? historicalDate : undefined)} title={view === 'historical' ? "Geçmiş Giderler" : "Günlük Giderler"} />
             </div>
             <div className="lg:col-span-8">
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -385,19 +362,15 @@ const App: React.FC = () => {
                     const targetDate = view === 'historical' ? historicalDate : new Date().toISOString().split('T')[0];
                     const fJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === targetDate);
                     const fExpenses = expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === targetDate);
-
                     if (fJobs.length === 0 && fExpenses.length === 0) {
                       return <div className="p-12 text-center text-slate-400 font-medium">Bu tarih için kayıt bulunmuyor.</div>;
                     }
-
                     return (
                       <>
                         {fJobs.map(job => (
                           <div key={job.id} className="p-4 flex justify-between items-center hover:bg-slate-50 transition-colors">
                             <div className="flex gap-4 items-center">
-                              <div className={`p-2 rounded-lg ${job.isAutoGenerated ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
-                                {job.isAutoGenerated ? <CheckCircle2 size={18} /> : <ArrowRightLeft size={18} />}
-                              </div>
+                              <div className={`p-2 rounded-lg ${job.isAutoGenerated ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}><ArrowRightLeft size={18} /></div>
                               <div>
                                 <div className="font-bold text-slate-900">{job.from} → {job.to}</div>
                                 <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
@@ -408,9 +381,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="font-black text-emerald-600">+{job.amount.toLocaleString('tr-TR')} ₺</div>
-                              <button onClick={() => deleteJob(job.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
-                                <Trash2 size={16} />
-                              </button>
+                              <button onClick={() => deleteJob(job.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
                             </div>
                           </div>
                         ))}
@@ -425,9 +396,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="font-black text-red-600">-{expense.amount.toLocaleString('tr-TR')} ₺</div>
-                              <button onClick={() => deleteExpense(expense.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
-                                <Trash2 size={16} />
-                              </button>
+                              <button onClick={() => deleteExpense(expense.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
                             </div>
                           </div>
                         ))}
@@ -442,9 +411,7 @@ const App: React.FC = () => {
 
         {view === 'scheduled' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-4">
-              <ScheduledJobForm onAdd={addScheduledJob} />
-            </div>
+            <div className="lg:col-span-4"><ScheduledJobForm onAdd={addScheduledJob} /></div>
             <div className="lg:col-span-8">
               <h2 className="text-xl font-bold text-slate-800 mb-4">Yaklaşan İşler</h2>
               {scheduledJobs.length === 0 ? (
@@ -460,14 +427,8 @@ const App: React.FC = () => {
                         </div>
                         <div>
                           <div className="font-bold text-slate-900 mb-1">{job.passengerName} <span className="text-xs text-indigo-600 font-bold">({job.company})</span></div>
-                          <div className="flex items-center gap-2 text-sm text-slate-600 font-medium">
-                            <MapPin size={14} className="text-indigo-500" />
-                            <span>{job.from} → {job.to}</span>
-                          </div>
-                          <div className="flex items-center gap-3 mt-2 text-xs font-bold text-slate-400">
-                             <span className="flex items-center gap-1"><Clock size={12}/> {job.time}</span>
-                             {isJobExpired(job.date, job.time) && <span className="text-red-500 bg-red-50 px-1.5 rounded">Zamanı Geldi</span>}
-                          </div>
+                          <div className="flex items-center gap-2 text-sm text-slate-600 font-medium"><MapPin size={14} className="text-indigo-500" /><span>{job.from} → {job.to}</span></div>
+                          <div className="flex items-center gap-3 mt-2 text-xs font-bold text-slate-400"><span className="flex items-center gap-1"><Clock size={12}/> {job.time}</span>{isJobExpired(job.date, job.time) && <span className="text-red-500 bg-red-50 px-1.5 rounded">Zamanı Geldi</span>}</div>
                         </div>
                       </div>
                       <div className="flex items-center justify-between md:flex-col md:items-end gap-3 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
@@ -493,7 +454,7 @@ const App: React.FC = () => {
             onDbConfigChange={(config) => {
               setDbConfig(config);
               localStorage.setItem('logistics_db_config', JSON.stringify(config));
-              pullFromCloud(config);
+              pullFromCloud();
             }}
             dbConfig={dbConfig}
             onSyncRequest={() => pullFromCloud()}
