@@ -35,3 +35,17 @@ export interface Stats {
   expenses: number;
   profit: number;
 }
+
+export interface SmsConfig {
+  username: string;
+  password: string;
+  header: string;
+  targetNumber: string;
+  autoSend: boolean;
+}
+
+export interface SmsLog {
+  jobId: string;
+  slot: 'morning' | 'afternoon' | 'evening';
+  date: string; // YYYY-MM-DD
+}

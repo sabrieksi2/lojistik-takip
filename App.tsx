@@ -22,10 +22,12 @@ import {
   Sun,
   Timer,
   FileText,
-  CheckCircle
+  CheckCircle,
+  MessageSquare,
+  Bell
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { Job, ScheduledJob, Expense, ExpenseType } from './types';
+import { Job, ScheduledJob, Expense, ExpenseType, SmsConfig, SmsLog } from './types';
 
 // Components
 import JobForm from './components/JobForm';
@@ -59,6 +61,16 @@ const App: React.FC = () => {
   const [dbConfig, setDbConfig] = useState<{ url: string; key: string }>(() => {
     const saved = localStorage.getItem('logistics_db_config');
     return saved ? JSON.parse(saved) : { url: '', key: '' };
+  });
+
+  const [smsConfig, setSmsConfig] = useState<SmsConfig>(() => {
+    const saved = localStorage.getItem('logistics_sms_config');
+    return saved ? JSON.parse(saved) : { username: '', password: '', header: 'BK LOJISTIK', targetNumber: '', autoSend: false };
+  });
+
+  const [smsLogs, setSmsLogs] = useState<SmsLog[]>(() => {
+    const saved = localStorage.getItem('logistics_sms_logs');
+    return saved ? JSON.parse(saved) : [];
   });
   
   const [isSyncing, setIsSyncing] = useState(false);
@@ -107,6 +119,10 @@ const App: React.FC = () => {
         setScheduledJobs(cloudData.scheduledJobs || []);
         setFinishedJobs(cloudData.finishedJobs || []);
         setExpenses(cloudData.expenses || []);
+        // Cloud'da saklanan SMS ayarlarını da çekiyoruz
+        if (cloudData.smsConfig) setSmsConfig(cloudData.smsConfig);
+        if (cloudData.smsLogs) setSmsLogs(cloudData.smsLogs);
+
         setLastSync(new Date().toLocaleTimeString('tr-TR'));
         setIsCloudActive(true);
         setSyncFlash(true);
@@ -144,16 +160,26 @@ const App: React.FC = () => {
     localStorage.setItem('logistics_scheduled', JSON.stringify(scheduledJobs));
     localStorage.setItem('logistics_finished', JSON.stringify(finishedJobs));
     localStorage.setItem('logistics_expenses', JSON.stringify(expenses));
-  }, [jobs, scheduledJobs, finishedJobs, expenses]);
+    localStorage.setItem('logistics_sms_config', JSON.stringify(smsConfig));
+    localStorage.setItem('logistics_sms_logs', JSON.stringify(smsLogs));
+  }, [jobs, scheduledJobs, finishedJobs, expenses, smsConfig, smsLogs]);
 
   const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; title: string; message: string; confirmText: string; type: 'danger' | 'success' | 'info'; onConfirm: () => void; }>({ isOpen: false, title: '', message: '', confirmText: '', type: 'info', onConfirm: () => {} });
 
-  const triggerSync = (updatedJobs?: Job[], updatedScheduled?: ScheduledJob[], updatedFinished?: ScheduledJob[], updatedExpenses?: Expense[]) => {
+  const triggerSync = (
+    updatedJobs?: Job[], 
+    updatedScheduled?: ScheduledJob[], 
+    updatedFinished?: ScheduledJob[], 
+    updatedExpenses?: Expense[],
+    updatedSmsConfig?: SmsConfig
+  ) => {
     pushToCloud({
       jobs: updatedJobs || jobs,
       scheduledJobs: updatedScheduled || scheduledJobs,
       finishedJobs: updatedFinished || finishedJobs,
-      expenses: updatedExpenses || expenses
+      expenses: updatedExpenses || expenses,
+      smsConfig: updatedSmsConfig || smsConfig,
+      smsLogs: smsLogs
     });
   };
 
@@ -252,6 +278,11 @@ const App: React.FC = () => {
     });
   };
 
+  const handleSmsConfigUpdate = (config: SmsConfig) => {
+    setSmsConfig(config);
+    triggerSync(undefined, undefined, undefined, undefined, config);
+  };
+
   return (
     <div className="min-h-screen transition-colors duration-300">
       <ConfirmationModal isOpen={modalConfig.isOpen} onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} onConfirm={modalConfig.onConfirm} title={modalConfig.title} message={modalConfig.message} confirmText={modalConfig.confirmText} type={modalConfig.type} />
@@ -266,11 +297,15 @@ const App: React.FC = () => {
             <span className="text-brand-goldLight tracking-widest">BK LOJİSTİK</span>
             <div className="flex items-center gap-1 opacity-70">
               {isCloudActive ? <Cloud size={10} /> : <CloudOff size={10} />}
-              <span className="text-[8px]">{isCloudActive ? "Canlı Bağlantı" : "Yerel Mod"}</span>
+              <span className="text-[8px]">{isCloudActive ? "Bulut Otomasyonu Bağlı" : "Yerel Mod"}</span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-brand-gold/20 px-3 py-1.5 rounded-full border border-brand-gold/30">
+             <Bell size={14} className={smsConfig.autoSend ? 'text-brand-gold animate-bounce' : 'text-slate-500'} />
+             <span className="text-[8px] text-brand-goldLight">{smsConfig.autoSend ? 'BULUT ASİSTAN AKTİF' : 'ASİSTAN KAPALI'}</span>
+          </div>
           <button onClick={() => setDarkMode(!darkMode)} className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20 transition-all border border-white/5">
             {darkMode ? <Sun size={14} className="text-brand-gold" /> : <Moon size={14} />}
             <span className="hidden sm:inline">{darkMode ? 'Aydınlık' : 'Karanlık'}</span>
@@ -475,7 +510,16 @@ const App: React.FC = () => {
         )}
 
         {view === 'stats' && (
-          <StatsOverview jobs={jobs} expenses={expenses} scheduledJobs={scheduledJobs} onDbConfigChange={(config) => { setDbConfig(config); localStorage.setItem('logistics_db_config', JSON.stringify(config)); pullFromCloud(); }} dbConfig={dbConfig} onSyncRequest={() => pullFromCloud()} />
+          <StatsOverview 
+            jobs={jobs} 
+            expenses={expenses} 
+            scheduledJobs={scheduledJobs} 
+            onDbConfigChange={(config) => { setDbConfig(config); localStorage.setItem('logistics_db_config', JSON.stringify(config)); pullFromCloud(); }} 
+            dbConfig={dbConfig} 
+            smsConfig={smsConfig}
+            onSmsConfigChange={handleSmsConfigUpdate}
+            onSyncRequest={() => pullFromCloud()} 
+          />
         )}
       </main>
     </div>
