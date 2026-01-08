@@ -46,7 +46,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
     setIsTestingSms(true);
     try {
       const now = new Date();
-      // Gelecek 24 saat içindeki işleri filtrele
       const toNotify = scheduledJobs.filter((j) => {
         const jobDate = new Date(`${j.date}T${j.time}`);
         const diff = jobDate.getTime() - now.getTime();
@@ -59,51 +58,43 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         return;
       }
 
-      const msg = "BK Test Hatirlatma:\n" + toNotify.map((j) => `${j.date} ${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
+      const msgText = "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
       
-      // Daha kararlı bir proxy servisi kullanıyoruz: codetabs
-      const targetUrl = 'https://api.iletimerkezi.com/v1/send-sms/json';
-      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
-
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          request: {
-            authentication: { 
-              username: tempSms.username, 
-              password: tempSms.password 
-            },
-            order: { 
-              sender: tempSms.header || 'BK TURIZM', 
-              message: { 
-                text: msg, 
-                recipients: { number: [tempSms.targetNumber] } 
-              } 
-            }
-          }
-        })
+      // GET API için parametreleri hazırlıyoruz
+      // Not: İleti Merkezi GET API'sinde 'recipients' değil 'receipents' (e ile) kullanılır.
+      const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
+      const params = new URLSearchParams({
+        username: tempSms.username,
+        password: tempSms.password,
+        text: msgText,
+        receipents: tempSms.targetNumber,
+        sender: tempSms.header || 'BK TURIZM'
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Proxy sunucusu hata verdi (${response.status}): ${errText.substring(0, 100)}`);
-      }
-
-      const result = await response.json();
+      const fullTargetUrl = `${baseUrl}?${params.toString()}`;
       
-      // API Yanıtını Kontrol Et
-      if (result?.response?.status?.code === '200' || result?.response?.status?.code === 200) {
+      // En güvenilir proxy: allorigins (GET isteklerinde asla takılmaz)
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(fullTargetUrl)}`;
+
+      const response = await fetch(proxyUrl);
+      
+      if (!response.ok) throw new Error("Proxy bağlantısı başarısız.");
+
+      const data = await response.json();
+      const xmlResponse = data.contents; // Proxy içindeki gerçek XML yanıtı
+
+      // İleti Merkezi başarılı yanıtta XML içinde <status><code>200</code></status> döner
+      if (xmlResponse.includes('<code>200</code>')) {
         alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi kanka.`);
       } else {
-        const errMsg = result?.response?.status?.message || "Bilinmeyen API hatası";
-        alert(`İleti Merkezi Hatası: ${errMsg}\nLütfen API Bilgilerini (Key/Hash) kontrol et.`);
+        // Hata durumunda XML içindeki mesajı kabaca ayıklayalım
+        const match = xmlResponse.match(/<message>(.*?)<\/message>/);
+        const errMsg = match ? match[1] : "Bilinmeyen API Hatası";
+        alert(`İleti Merkezi Hatası: ${errMsg}\nLütfen API bilgilerini kontrol et kanka.`);
       }
     } catch (err: any) {
-      console.error("SMS Test Detaylı Hata:", err);
-      alert(`Bağlantı hatası kanka: ${err.message}\n\nİpucu: Eğer hata devam ederse, internet tarayıcının çerezlerini temizleyip tekrar dene veya İleti Merkezi panelinden IP kısıtlaması olup olmadığını kontrol et.`);
+      console.error("SMS Detaylı Hata:", err);
+      alert(`Bağlantı hatası kanka: ${err.message}. Lütfen internetini veya İleti Merkezi üyeliğini kontrol et.`);
     } finally {
       setIsTestingSms(false);
     }
