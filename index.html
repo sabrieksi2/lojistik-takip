@@ -58,6 +58,12 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+        
+        /* Datalist (Seçim listesi) olan inputlardaki tarayıcı varsayılan ok işaretini gizle */
+        input[list]::-webkit-calendar-picker-indicator {
+            display: none !important;
+            -webkit-appearance: none;
+        }
     </style>
 <script type="importmap">
 {
@@ -68,7 +74,9 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "recharts": "https://esm.sh/recharts@^3.6.0",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.49.1",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
+    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+    "jspdf": "https://esm.sh/jspdf@2.5.1",
+    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
   }
 }
 </script>

@@ -1,6 +1,8 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, Calendar, Download, Building2, User, Clock, MapPin, CheckCircle2, Settings2, Save, Check, MapPinned } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { FileText, Download, Settings2, Save, Check, MapPinned, Clock, FileType } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { ScheduledJob } from '../types';
 
 interface ReportGeneratorProps {
@@ -15,8 +17,8 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [jobConfigs, setJobConfigs] = useState<Record<string, WorkModel>>({});
   const [isSaved, setIsSaved] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  // Sabit gider kalemleri - LocalStorage desteği eklendi
   const [fixedFees, setFixedFees] = useState(() => {
     const saved = localStorage.getItem('bk_report_fees');
     return saved ? JSON.parse(saved) : {
@@ -47,7 +49,10 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
     setJobConfigs(prev => ({ ...prev, [jobId]: model }));
   };
 
-  const downloadReport = () => {
+  const downloadReport = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+
     let grandTotalService = 0;
     let grandTotalFerry = 0;
     let grandTotalYss = 0;
@@ -64,32 +69,25 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       let jobCosts = [];
       let jobTotal = Number(fixedFees.service);
       
-      // Her zaman eklenen kalemler
       grandTotalService += Number(fixedFees.service);
-      jobCosts.push(`Hizmet Bedeli: ${fixedFees.service} TL`);
+      jobCosts.push(`Hizmet: ${fixedFees.service} TL`);
 
-      // Gemi ve Osmangazi her zaman var
-      jobTotal += Number(fixedFees.ferry);
       grandTotalFerry += Number(fixedFees.ferry);
       jobCosts.push(`Gemi: ${fixedFees.ferry} TL`);
 
-      // Osmangazi her zaman var
-      jobTotal += Number(fixedFees.osmangazi);
       grandTotalOsmangazi += Number(fixedFees.osmangazi);
-      jobCosts.push(`Osmangazi Köprüsü: ${fixedFees.osmangazi} TL`);
+      jobCosts.push(`Osmangazi: ${fixedFees.osmangazi} TL`);
 
-      // Model 1 ve 2 için YSS ve Marmara
       if (model === 'ist-pickup' || model === 'ist-dropoff') {
         jobTotal += Number(fixedFees.yss);
         grandTotalYss += Number(fixedFees.yss);
-        jobCosts.push(`YSS Köprüsü: ${fixedFees.yss} TL`);
+        jobCosts.push(`YSS: ${fixedFees.yss} TL`);
 
         jobTotal += Number(fixedFees.marmara);
         grandTotalMarmara += Number(fixedFees.marmara);
-        jobCosts.push(`Kuzey Marmara Yolu: ${fixedFees.marmara} TL`);
+        jobCosts.push(`K.Marmara: ${fixedFees.marmara} TL`);
       }
 
-      // Sadece Model 1 (Pickup) için Otopark
       if (model === 'ist-pickup') {
         jobTotal += Number(fixedFees.parking);
         grandTotalParking += Number(fixedFees.parking);
@@ -97,9 +95,14 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       }
 
       reportItemsHtml += `
-        <div class='item' style='margin-bottom: 18px; font-size: 10.5pt; line-height: 1.5; padding-left: 10px; border-left: 3px solid #d4af37;'>
-          - Saat <b>${job.time}</b> 'de (<b>${job.passengerName}</b>) belirttiğiniz <b>${job.from}</b> lokasyonundan <b>${job.to}</b> lokasyonuna <b>${dateFormatted}</b> tarihinde ulaşımı sağlanmıştır.
-          <div class='item-details' style='font-size: 9pt; color: #666; margin-top: 4px;'>
+        <div style="margin-bottom: 20px; border-left: 4px solid #d4af37; padding-left: 15px;">
+          <div style="font-size: 11pt; font-weight: bold; color: #0a192f;">
+            ${dateFormatted} | ${job.time} - ${job.passengerName}
+          </div>
+          <div style="font-size: 10pt; color: #334155; margin: 4px 0;">
+            ${job.from} <span style="color: #d4af37;">→</span> ${job.to}
+          </div>
+          <div style="font-size: 9pt; color: #64748b;">
             Döküm: ${jobCosts.join(', ')} | <b>Alt Toplam: ${jobTotal} TL</b>
           </div>
         </div>
@@ -108,58 +111,71 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
 
     const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking;
 
-    let reportContent = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-      <head><meta charset='utf-8'><title>Aylık Hizmet Raporu</title>
-      <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #333; }
-        .header { text-align: center; color: #0a192f; font-size: 24pt; font-weight: bold; margin-bottom: 5px; }
-        .sub-header { text-align: center; color: #d4af37; font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 2px; }
-        .period { text-align: center; font-size: 11pt; margin-bottom: 40px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
-        .summary-box { margin-top: 50px; padding: 25px; border: 1pt solid #0a192f; background-color: #fafafa; }
-        .summary-title { font-size: 13pt; font-weight: bold; border-bottom: 1px solid #d4af37; margin-bottom: 15px; padding-bottom: 8px; color: #0a192f; }
-        .table { width: 100%; border-collapse: collapse; }
-        .table td { padding: 6px 0; font-size: 10pt; }
-        .grand-total-row { border-top: 2px solid #0a192f; margin-top: 10px; padding-top: 10px; font-size: 14pt; font-weight: bold; color: #0a192f; }
-        .footer { margin-top: 60px; font-size: 12pt; font-weight: bold; color: #0a192f; }
-      </style>
-      </head>
-      <body>
-        <div class='header'>BK TURİZM</div>
-        <div class='sub-header'>AYLIK HİZMET RAPORU</div>
-        <div class='period'>Rapor Dönemi: ${startDate} — ${endDate}</div>
-        
+    // Rapor konteynerı oluştur
+    const reportDiv = document.createElement('div');
+    reportDiv.style.position = 'absolute';
+    reportDiv.style.left = '-9999px';
+    reportDiv.style.top = '0';
+    reportDiv.style.width = '800px';
+    reportDiv.style.padding = '50px';
+    reportDiv.style.backgroundColor = '#ffffff';
+    reportDiv.style.fontFamily = 'Arial, sans-serif';
+
+    reportDiv.innerHTML = `
+      <div style="text-align: center; margin-bottom: 40px;">
+        <h1 style="color: #0a192f; font-size: 28pt; margin: 0; font-weight: 900; letter-spacing: 2px;">BK TURİZM</h1>
+        <h2 style="color: #d4af37; font-size: 16pt; margin: 5px 0 20px; font-weight: 700; letter-spacing: 3px; border-bottom: 2px solid #f1f5f9; padding-bottom: 15px;">AYLIK HİZMET RAPORU</h2>
+        <p style="color: #64748b; font-size: 11pt;">Dönem: ${startDate} — ${endDate}</p>
+      </div>
+
+      <div style="margin-bottom: 40px;">
         ${reportItemsHtml}
+      </div>
 
-        <div class='summary-box'>
-          <div class='summary-title'>GENEL HAKEDİŞ ÖZETİ</div>
-          <table class='table'>
-            <tr><td>Toplam Hizmet Bedeli</td><td align='right'>${grandTotalService.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td>Toplam Gemi Geçiş Ücreti</td><td align='right'>${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td>Toplam YSS Köprü Ücreti</td><td align='right'>${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td>Toplam Kuzey Marmara Yolu Ücreti</td><td align='right'>${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td>Toplam Osmangazi Köprü Ücreti</td><td align='right'>${grandTotalOsmangazi.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td>Toplam Otopark Ücreti</td><td align='right'>${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
-            <tr class='grand-total-row'>
-              <td>GENEL TOPLAM HAKEDİŞ</td>
-              <td align='right'>${totalSummary.toLocaleString('tr-TR')} TL</td>
-            </tr>
-          </table>
-        </div>
+      <div style="background-color: #f8fafc; border: 2px solid #0a192f; padding: 25px; border-radius: 10px;">
+        <h3 style="color: #0a192f; border-bottom: 2px solid #d4af37; padding-bottom: 10px; margin-bottom: 15px; font-size: 14pt;">GENEL HAKEDİŞ ÖZETİ</h3>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11pt;">
+          <tr><td style="padding: 5px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right;">${grandTotalService.toLocaleString('tr-TR')} TL</td></tr>
+          <tr><td style="padding: 5px 0;">Toplam Gemi Geçiş Ücreti</td><td style="text-align: right;">${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
+          <tr><td style="padding: 5px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
+          <tr><td style="padding: 5px 0;">Toplam Kuzey Marmara Ücreti</td><td style="text-align: right;">${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
+          <tr><td style="padding: 5px 0;">Toplam Osmangazi Ücreti</td><td style="text-align: right;">${grandTotalOsmangazi.toLocaleString('tr-TR')} TL</td></tr>
+          <tr><td style="padding: 5px 0;">Toplam Otopark Ücreti</td><td style="text-align: right;">${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
+          <tr style="border-top: 2px solid #0a192f; font-weight: bold; font-size: 14pt; color: #0a192f;">
+            <td style="padding: 15px 0 0;">GENEL TOPLAM</td>
+            <td style="text-align: right; padding: 15px 0 0;">${totalSummary.toLocaleString('tr-TR')} TL</td>
+          </tr>
+        </table>
+      </div>
 
-        <div class='footer'>İyi Çalışmalar Dileriz.</div>
-      </body>
-      </html>
+      <div style="margin-top: 50px; font-weight: bold; color: #0a192f; font-size: 12pt;">
+        İyi Çalışmalar Dileriz.
+      </div>
     `;
 
-    const blob = new Blob(['\ufeff', reportContent], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `BK_Turizm_Hizmet_Raporu_${startDate}_${endDate}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.body.appendChild(reportDiv);
+
+    try {
+      const canvas = await html2canvas(reportDiv, {
+        scale: 2, // Higher quality
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`BK_Turizm_Raporu_${startDate}_${endDate}.pdf`);
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      alert('Rapor oluşturulurken bir hata oluştu.');
+    } finally {
+      document.body.removeChild(reportDiv);
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -225,7 +241,6 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
               </div>
             ))}
           </div>
-          <p className="text-[9px] text-slate-400 font-bold mt-4 uppercase tracking-tighter">* Bu ücretler rapor oluşturulurken seçtiğiniz çalışma modeline göre otomatik toplanır.</p>
         </div>
 
         <div className="space-y-4">
@@ -281,12 +296,16 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
 
         <div className="mt-10">
           <button 
-            disabled={allRelevantJobs.length === 0}
+            disabled={allRelevantJobs.length === 0 || isGenerating}
             onClick={downloadReport}
             className="w-full relative group overflow-hidden bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black py-6 rounded-[2rem] shadow-2xl transition-all active:scale-[0.98] uppercase tracking-[0.3em] flex items-center justify-center gap-4 disabled:opacity-30 disabled:grayscale"
           >
-            <Download size={22} />
-            AYLIK HAKEDİŞ RAPORUNU İNDİR (.DOC)
+            {isGenerating ? (
+              <FileType size={22} className="animate-pulse" />
+            ) : (
+              <Download size={22} />
+            )}
+            {isGenerating ? 'RAPOR HAZIRLANIYOR...' : 'AYLIK HAKEDİŞ RAPORUNU İNDİR (.PDF)'}
             <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
           </button>
         </div>

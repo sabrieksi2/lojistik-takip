@@ -14,7 +14,9 @@
     "lucide-react": "^0.562.0",
     "recharts": "^3.6.0",
     "@supabase/supabase-js": "^2.49.1",
-    "@google/genai": "^1.35.0"
+    "@google/genai": "^1.35.0",
+    "jspdf": "2.5.1",
+    "html2canvas": "1.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

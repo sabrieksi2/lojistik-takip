@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { PlusCircle, Wallet, Building2, MapPin, Car } from 'lucide-react';
+import { PlusCircle, Wallet, Building2, MapPin, Car, ChevronDown } from 'lucide-react';
 
 interface JobFormProps {
   onAdd: (job: { company: string; from: string; to: string; amount: number }) => void;
@@ -52,10 +52,11 @@ const JobForm: React.FC<JobFormProps> = ({ onAdd, title = "Günlük İş Girişi
               type="text" 
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              placeholder="Firma İsmi"
-              className="w-full pl-14 pr-6 py-5 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-[1.5rem] focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold focus:outline-none transition-all text-slate-900 dark:text-slate-100 placeholder:text-slate-300 font-bold text-lg shadow-inner"
+              placeholder="Firma İsmi Seç veya Yaz"
+              className="w-full pl-14 pr-12 py-5 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-[1.5rem] focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold focus:outline-none transition-all text-slate-900 dark:text-slate-100 placeholder:text-slate-300 font-bold text-lg shadow-inner"
               required
             />
+            <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-brand-gold/40 pointer-events-none" size={20} />
             <datalist id="company-list">
               {companies.map(c => <option key={c} value={c} />)}
             </datalist>

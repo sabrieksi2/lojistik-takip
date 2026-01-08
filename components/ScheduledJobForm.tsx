@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Calendar, User, MapPin, Clock, CreditCard, Building2 } from 'lucide-react';
+import { Calendar, User, MapPin, Clock, CreditCard, Building2, ChevronDown } from 'lucide-react';
 
 interface ScheduledJobFormProps {
   onAdd: (job: { company: string; passengerName: string; from: string; to: string; fee: number; date: string; time: string }) => void;
@@ -54,9 +54,10 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
               value={company}
               onChange={(e) => setCompany(e.target.value)}
               placeholder="Firma Adı"
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-slate-900 dark:text-slate-100 font-medium"
+              className="w-full pl-10 pr-10 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-slate-900 dark:text-slate-100 font-medium"
               required
             />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
           </div>
         </div>
 
@@ -84,9 +85,10 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
                 list="location-list"
                 type="text" value={from} onChange={(e) => setFrom(e.target.value)}
                 placeholder="Seç veya yaz..."
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
                 required
               />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={14} />
             </div>
           </div>
           <div>
@@ -97,9 +99,10 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
                 list="location-list"
                 type="text" value={to} onChange={(e) => setTo(e.target.value)}
                 placeholder="Seç veya yaz..."
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
                 required
               />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={14} />
             </div>
           </div>
           <datalist id="location-list">
