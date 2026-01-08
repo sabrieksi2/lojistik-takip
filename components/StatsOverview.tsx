@@ -38,8 +38,13 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
   };
 
   const handleManualSmsTest = async () => {
-    if (!tempSms.username || !tempSms.password || !tempSms.targetNumber) {
-      alert("Kanka önce API bilgilerini (Anahtar, Hash ve Hedef Numara) girmelisin!");
+    // Bilgileri temizle (sağda solda boşluk kalmasın)
+    const username = tempSms.username.trim();
+    const password = tempSms.password.trim();
+    const targetNumber = tempSms.targetNumber.trim().replace(/\s/g, '');
+
+    if (!username || !password || !targetNumber) {
+      alert("Kanka API bilgilerini (Key, Hash ve Numara) eksiksiz girmelisin!");
       return;
     }
 
@@ -53,48 +58,44 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
       });
 
       if (toNotify.length === 0) {
-        alert("Kanka önümüzdeki 24 saat içinde planlanmış bir iş bulamadım, o yüzden SMS gönderilmedi. Test etmek için yarına bir iş ekleyebilirsin.");
+        alert("Kanka önümüzdeki 24 saat içinde planlanmış bir iş bulamadım. Test etmek için lütfen yarına bir iş ekle.");
         setIsTestingSms(false);
         return;
       }
 
       const msgText = "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
       
-      // GET API için parametreleri hazırlıyoruz
-      // Not: İleti Merkezi GET API'sinde 'recipients' değil 'receipents' (e ile) kullanılır.
+      // İleti Merkezi GET API Parametreleri
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      const params = new URLSearchParams({
-        username: tempSms.username,
-        password: tempSms.password,
-        text: msgText,
-        receipents: tempSms.targetNumber,
-        sender: tempSms.header || 'BK TURIZM'
+      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(tempSms.header || 'BK TURIZM')}`;
+      
+      const fullTargetUrl = baseUrl + query;
+      
+      // En hızlı ve stabil proxy: corsproxy.io (Sadece URL'nin başına eklenir)
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(fullTargetUrl)}`;
+
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/xml' }
       });
-
-      const fullTargetUrl = `${baseUrl}?${params.toString()}`;
       
-      // En güvenilir proxy: allorigins (GET isteklerinde asla takılmaz)
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(fullTargetUrl)}`;
+      if (!response.ok) throw new Error(`Sunucu yanıt vermedi (Hata: ${response.status})`);
 
-      const response = await fetch(proxyUrl);
-      
-      if (!response.ok) throw new Error("Proxy bağlantısı başarısız.");
+      const xmlText = await response.text();
+      console.log("API Yanıtı:", xmlText);
 
-      const data = await response.json();
-      const xmlResponse = data.contents; // Proxy içindeki gerçek XML yanıtı
-
-      // İleti Merkezi başarılı yanıtta XML içinde <status><code>200</code></status> döner
-      if (xmlResponse.includes('<code>200</code>')) {
-        alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi kanka.`);
+      if (xmlText.includes('<code>200</code>')) {
+        alert(`Tebrikler kanka! ${toNotify.length} iş için SMS başarıyla gönderildi.`);
+      } else if (xmlText.includes('<code>401</code>') || xmlText.includes('Üyelik bilgileri hatalı')) {
+        alert("İleti Merkezi Hatası: Üyelik bilgileri hatalı.\n\nKanka Şunları Kontrol Et:\n1. Key ve Hash bilgilerini doğru girdiğine emin ol.\n2. İleti Merkezi panelinden 'IP Kısıtlaması' özelliğinin KAPALI olduğundan emin ol.");
       } else {
-        // Hata durumunda XML içindeki mesajı kabaca ayıklayalım
-        const match = xmlResponse.match(/<message>(.*?)<\/message>/);
+        const match = xmlText.match(/<message>(.*?)<\/message>/);
         const errMsg = match ? match[1] : "Bilinmeyen API Hatası";
-        alert(`İleti Merkezi Hatası: ${errMsg}\nLütfen API bilgilerini kontrol et kanka.`);
+        alert(`İleti Merkezi Hatası: ${errMsg}`);
       }
     } catch (err: any) {
-      console.error("SMS Detaylı Hata:", err);
-      alert(`Bağlantı hatası kanka: ${err.message}. Lütfen internetini veya İleti Merkezi üyeliğini kontrol et.`);
+      console.error("SMS Hatası:", err);
+      alert(`Bağlantı sorunu kanka: ${err.message}. Lütfen proxy sunucusunun yoğun olabileceğini düşünerek 1-2 dakika sonra tekrar dene.`);
     } finally {
       setIsTestingSms(false);
     }
