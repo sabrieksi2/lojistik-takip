@@ -53,127 +53,137 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
     if (isGenerating) return;
     setIsGenerating(true);
 
-    let grandTotalService = 0;
-    let grandTotalFerry = 0;
-    let grandTotalYss = 0;
-    let grandTotalMarmara = 0;
-    let grandTotalOsmangazi = 0;
-    let grandTotalParking = 0;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const margin = 15;
+    const pageBottomLimit = pdfHeight - 25; // Sayfa sonu güvenli bölge (25mm)
+    let currentY = margin;
 
-    let reportItemsHtml = '';
+    // Geçici bir container oluştur (Render için)
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '-9999px';
+    container.style.width = '800px';
+    container.style.backgroundColor = '#ffffff';
+    document.body.appendChild(container);
 
-    allRelevantJobs.forEach(job => {
-      const model = jobConfigs[job.id] || 'ist-pickup';
-      const dateFormatted = new Date(job.date).toLocaleDateString('tr-TR');
-      
-      let jobCosts = [];
-      let jobTotal = Number(fixedFees.service);
-      
-      grandTotalService += Number(fixedFees.service);
-      jobCosts.push(`Hizmet: ${fixedFees.service} TL`);
+    const renderElementToPdf = async (html: string) => {
+      const el = document.createElement('div');
+      el.innerHTML = html;
+      el.style.padding = '1px'; // Border-box hesaplamaları için
+      container.innerHTML = '';
+      container.appendChild(el);
 
-      grandTotalFerry += Number(fixedFees.ferry);
-      jobCosts.push(`Gemi: ${fixedFees.ferry} TL`);
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', logging: false });
+      const imgData = canvas.toDataURL('image/png');
+      const imgProps = pdf.getImageProperties(imgData);
+      const imgDisplayWidth = pdfWidth - (margin * 2);
+      const imgDisplayHeight = (imgProps.height * imgDisplayWidth) / imgProps.width;
 
-      grandTotalOsmangazi += Number(fixedFees.osmangazi);
-      jobCosts.push(`Osmangazi: ${fixedFees.osmangazi} TL`);
-
-      if (model === 'ist-pickup' || model === 'ist-dropoff') {
-        jobTotal += Number(fixedFees.yss);
-        grandTotalYss += Number(fixedFees.yss);
-        jobCosts.push(`YSS: ${fixedFees.yss} TL`);
-
-        jobTotal += Number(fixedFees.marmara);
-        grandTotalMarmara += Number(fixedFees.marmara);
-        jobCosts.push(`K.Marmara: ${fixedFees.marmara} TL`);
+      // Eğer eklenen parça sayfa sonunu geçiyorsa yeni sayfaya at
+      if (currentY + imgDisplayHeight > pageBottomLimit) {
+        pdf.addPage();
+        currentY = margin;
       }
 
-      if (model === 'ist-pickup') {
-        jobTotal += Number(fixedFees.parking);
-        grandTotalParking += Number(fixedFees.parking);
-        jobCosts.push(`Otopark: ${fixedFees.parking} TL`);
-      }
-
-      reportItemsHtml += `
-        <div style="margin-bottom: 20px; border-left: 4px solid #d4af37; padding-left: 15px;">
-          <div style="font-size: 11pt; font-weight: bold; color: #0a192f;">
-            ${dateFormatted} | ${job.time} - ${job.passengerName}
-          </div>
-          <div style="font-size: 10pt; color: #334155; margin: 4px 0;">
-            ${job.from} <span style="color: #d4af37;">→</span> ${job.to}
-          </div>
-          <div style="font-size: 9pt; color: #64748b;">
-            Döküm: ${jobCosts.join(', ')} | <b>Alt Toplam: ${jobTotal} TL</b>
-          </div>
-        </div>
-      `;
-    });
-
-    const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking;
-
-    // Rapor konteynerı oluştur
-    const reportDiv = document.createElement('div');
-    reportDiv.style.position = 'absolute';
-    reportDiv.style.left = '-9999px';
-    reportDiv.style.top = '0';
-    reportDiv.style.width = '800px';
-    reportDiv.style.padding = '50px';
-    reportDiv.style.backgroundColor = '#ffffff';
-    reportDiv.style.fontFamily = 'Arial, sans-serif';
-
-    reportDiv.innerHTML = `
-      <div style="text-align: center; margin-bottom: 40px;">
-        <h1 style="color: #0a192f; font-size: 28pt; margin: 0; font-weight: 900; letter-spacing: 2px;">BK TURİZM</h1>
-        <h2 style="color: #d4af37; font-size: 16pt; margin: 5px 0 20px; font-weight: 700; letter-spacing: 3px; border-bottom: 2px solid #f1f5f9; padding-bottom: 15px;">AYLIK HİZMET RAPORU</h2>
-        <p style="color: #64748b; font-size: 11pt;">Dönem: ${startDate} — ${endDate}</p>
-      </div>
-
-      <div style="margin-bottom: 40px;">
-        ${reportItemsHtml}
-      </div>
-
-      <div style="background-color: #f8fafc; border: 2px solid #0a192f; padding: 25px; border-radius: 10px;">
-        <h3 style="color: #0a192f; border-bottom: 2px solid #d4af37; padding-bottom: 10px; margin-bottom: 15px; font-size: 14pt;">GENEL HAKEDİŞ ÖZETİ</h3>
-        <table style="width: 100%; border-collapse: collapse; font-size: 11pt;">
-          <tr><td style="padding: 5px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right;">${grandTotalService.toLocaleString('tr-TR')} TL</td></tr>
-          <tr><td style="padding: 5px 0;">Toplam Gemi Geçiş Ücreti</td><td style="text-align: right;">${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
-          <tr><td style="padding: 5px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
-          <tr><td style="padding: 5px 0;">Toplam Kuzey Marmara Ücreti</td><td style="text-align: right;">${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
-          <tr><td style="padding: 5px 0;">Toplam Osmangazi Ücreti</td><td style="text-align: right;">${grandTotalOsmangazi.toLocaleString('tr-TR')} TL</td></tr>
-          <tr><td style="padding: 5px 0;">Toplam Otopark Ücreti</td><td style="text-align: right;">${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
-          <tr style="border-top: 2px solid #0a192f; font-weight: bold; font-size: 14pt; color: #0a192f;">
-            <td style="padding: 15px 0 0;">GENEL TOPLAM</td>
-            <td style="text-align: right; padding: 15px 0 0;">${totalSummary.toLocaleString('tr-TR')} TL</td>
-          </tr>
-        </table>
-      </div>
-
-      <div style="margin-top: 50px; font-weight: bold; color: #0a192f; font-size: 12pt;">
-        İyi Çalışmalar Dileriz.
-      </div>
-    `;
-
-    document.body.appendChild(reportDiv);
+      pdf.addImage(imgData, 'PNG', margin, currentY, imgDisplayWidth, imgDisplayHeight, undefined, 'FAST');
+      currentY += imgDisplayHeight + 5; // Parçalar arası 5mm boşluk
+    };
 
     try {
-      const canvas = await html2canvas(reportDiv, {
-        scale: 2, // Higher quality
-        useCORS: true,
-        backgroundColor: '#ffffff'
-      });
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      // 1. BAŞLIK BÖLÜMÜ
+      const headerHtml = `
+        <div style="text-align: center; padding: 40px 0; font-family: Arial, sans-serif;">
+          <h1 style="color: #0a192f; font-size: 32pt; margin: 0; font-weight: 900; letter-spacing: 3px;">BK TURİZM</h1>
+          <div style="height: 3px; background-color: #d4af37; width: 150px; margin: 15px auto;"></div>
+          <h2 style="color: #0a192f; font-size: 16pt; margin: 5px 0 10px; font-weight: 700; letter-spacing: 2px;">AYLIK HİZMET RAPORU</h2>
+          <p style="color: #64748b; font-size: 11pt; font-weight: bold;">Dönem: ${startDate} — ${endDate}</p>
+          <div style="margin-top: 20px; border-bottom: 1px solid #f1f5f9;"></div>
+        </div>
+      `;
+      await renderElementToPdf(headerHtml);
+
+      // 2. İŞ KALEMLERİ (Her biri ayrı parça)
+      let grandTotalService = 0, grandTotalFerry = 0, grandTotalYss = 0, grandTotalMarmara = 0, grandTotalOsmangazi = 0, grandTotalParking = 0;
+
+      for (const job of allRelevantJobs) {
+        const model = jobConfigs[job.id] || 'ist-pickup';
+        const dateFormatted = new Date(job.date).toLocaleDateString('tr-TR');
+        let costs = [];
+        let subTotal = Number(fixedFees.service);
+        
+        grandTotalService += Number(fixedFees.service);
+        costs.push(`Hizmet: ${fixedFees.service} TL`);
+        grandTotalFerry += Number(fixedFees.ferry);
+        costs.push(`Gemi: ${fixedFees.ferry} TL`);
+        grandTotalOsmangazi += Number(fixedFees.osmangazi);
+        costs.push(`Osmangazi: ${fixedFees.osmangazi} TL`);
+
+        if (model === 'ist-pickup' || model === 'ist-dropoff') {
+          subTotal += Number(fixedFees.yss) + Number(fixedFees.marmara);
+          grandTotalYss += Number(fixedFees.yss);
+          grandTotalMarmara += Number(fixedFees.marmara);
+          costs.push(`YSS: ${fixedFees.yss} TL`, `K.Marmara: ${fixedFees.marmara} TL`);
+        }
+        if (model === 'ist-pickup') {
+          subTotal += Number(fixedFees.parking);
+          grandTotalParking += Number(fixedFees.parking);
+          costs.push(`Otopark: ${fixedFees.parking} TL`);
+        }
+
+        const jobHtml = `
+          <div style="margin-bottom: 10px; border-left: 5px solid #d4af37; padding: 15px; font-family: Arial, sans-serif; background: #ffffff;">
+            <div style="font-size: 12pt; font-weight: bold; color: #0a192f;">${dateFormatted} | ${job.time} - ${job.passengerName}</div>
+            <div style="font-size: 10pt; color: #334155; margin: 5px 0;">${job.from} <span style="color: #d4af37;">→</span> ${job.to}</div>
+            <div style="font-size: 9pt; color: #64748b; border-top: 1px dashed #eee; padding-top: 5px; margin-top: 5px;">
+              Döküm: ${costs.join(', ')} | <b style="color: #0a192f;">Toplam: ${subTotal} TL</b>
+            </div>
+          </div>
+        `;
+        await renderElementToPdf(jobHtml);
+      }
+
+      // 3. ÖZET TABLOSU (KDV Dahil)
+      const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking;
+      const vatAmount = totalSummary * 0.20;
+      const grandTotalWithVat = totalSummary + vatAmount;
+
+      const summaryHtml = `
+        <div style="background-color: #f8fafc; border: 2px solid #0a192f; padding: 30px; border-radius: 15px; font-family: Arial, sans-serif; margin-top: 20px;">
+          <h3 style="color: #0a192f; border-bottom: 2px solid #d4af37; padding-bottom: 12px; margin-bottom: 20px; font-size: 16pt; font-weight: 800;">GENEL HAKEDİŞ ÖZETİ</h3>
+          <table style="width: 100%; border-collapse: collapse; font-size: 12pt;">
+            <tr><td style="padding: 6px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right; font-weight: bold;">${grandTotalService.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam Gemi Geçiş Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam Kuzey Marmara Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam Osmangazi Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalOsmangazi.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0; border-bottom: 1px solid #cbd5e1;">Toplam Otopark Ücreti</td><td style="text-align: right; font-weight: bold; border-bottom: 1px solid #cbd5e1;">${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
+            
+            <tr style="color: #334155;">
+              <td style="padding: 12px 0 5px; font-weight: 700;">MATRAH (ARA TOPLAM)</td>
+              <td style="text-align: right; padding: 12px 0 5px; font-weight: 800;">${totalSummary.toLocaleString('tr-TR')} TL</td>
+            </tr>
+            <tr style="color: #64748b; font-size: 11pt;">
+              <td style="padding: 5px 0;">KDV (%20)</td>
+              <td style="text-align: right; padding: 5px 0;">${vatAmount.toLocaleString('tr-TR')} TL</td>
+            </tr>
+            <tr style="border-top: 3px solid #0a192f;">
+              <td style="padding: 20px 0 0; font-weight: 900; font-size: 16pt; color: #0a192f;">GENEL TOPLAM (KDV DAHİL)</td>
+              <td style="text-align: right; padding: 20px 0 0; font-weight: 900; font-size: 18pt; color: #d4af37;">${grandTotalWithVat.toLocaleString('tr-TR')} TL</td>
+            </tr>
+          </table>
+          <div style="margin-top: 40px; font-weight: bold; color: #0a192f; font-size: 12pt;">İyi Çalışmalar Dileriz.</div>
+        </div>
+      `;
+      await renderElementToPdf(summaryHtml);
+
       pdf.save(`BK_Turizm_Raporu_${startDate}_${endDate}.pdf`);
     } catch (error) {
-      console.error('PDF generation error:', error);
-      alert('Rapor oluşturulurken bir hata oluştu.');
+      console.error('PDF error:', error);
+      alert('Hata oluştu kanka, konsola bak.');
     } finally {
-      document.body.removeChild(reportDiv);
+      document.body.removeChild(container);
       setIsGenerating(false);
     }
   };
