@@ -31,6 +31,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
   const [tempSms, setTempSms] = useState<SmsConfig>(smsConfig);
 
   const copyToClipboard = (text: string, id: string) => {
+    // FIX: Changed WriteText to writeText
     navigator.clipboard.writeText(text);
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
@@ -291,7 +292,7 @@ Deno.serve(async (req) => {
                  <div className="space-y-4">
                     <div className="bg-emerald-900/10 p-4 rounded-xl border border-emerald-500/20">
                        <p className="text-white font-bold mb-2 uppercase tracking-widest text-[11px]">Sistem Kontrol Komutu</p>
-                       <p className="text-slate-400 mb-3 italic">SQL Editor'da (">_" simgesi) bu kodu çalıştırarak aktif görevlerini görebilirsin:</p>
+                       <p className="text-slate-400 mb-3 italic">SQL Editor'da ("&gt;_" simgesi) bu kodu çalıştırarak aktif görevlerini görebilirsin:</p>
                        <div className="relative">
                           <pre className="bg-slate-900 p-3 rounded-lg border border-white/5 text-emerald-300">{checkCronSql}</pre>
                           <button onClick={() => copyToClipboard(checkCronSql, 'check-cron')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:text-white transition-all">
