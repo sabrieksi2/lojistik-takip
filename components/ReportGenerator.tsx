@@ -111,21 +111,26 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         const model = jobConfigs[job.id] || 'ist-pickup';
         const dateFormatted = new Date(job.date).toLocaleDateString('tr-TR');
         let costs = [];
-        let subTotal = Number(fixedFees.service);
+        
+        // Sabitler (Her modelde var)
+        let subTotal = Number(fixedFees.service) + Number(fixedFees.ferry) + Number(fixedFees.osmangazi);
         
         grandTotalService += Number(fixedFees.service);
-        costs.push(`Hizmet: ${fixedFees.service} TL`);
         grandTotalFerry += Number(fixedFees.ferry);
-        costs.push(`Gemi: ${fixedFees.ferry} TL`);
         grandTotalOsmangazi += Number(fixedFees.osmangazi);
+
+        costs.push(`Hizmet: ${fixedFees.service} TL`);
+        costs.push(`Gemi: ${fixedFees.ferry} TL`);
         costs.push(`Osmangazi: ${fixedFees.osmangazi} TL`);
 
+        // Modele göre değişkenler
         if (model === 'ist-pickup' || model === 'ist-dropoff') {
           subTotal += Number(fixedFees.yss) + Number(fixedFees.marmara);
           grandTotalYss += Number(fixedFees.yss);
           grandTotalMarmara += Number(fixedFees.marmara);
           costs.push(`YSS: ${fixedFees.yss} TL`, `K.Marmara: ${fixedFees.marmara} TL`);
         }
+        
         if (model === 'ist-pickup') {
           subTotal += Number(fixedFees.parking);
           grandTotalParking += Number(fixedFees.parking);
