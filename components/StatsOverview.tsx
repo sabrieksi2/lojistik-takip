@@ -61,9 +61,9 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
 
       const msg = "BK Test Hatirlatma:\n" + toNotify.map((j) => `${j.date} ${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
       
-      // CORS hatasını aşmak için köprü (proxy) ekliyoruz
+      // Daha kararlı bir proxy servisi kullanıyoruz: codetabs
       const targetUrl = 'https://api.iletimerkezi.com/v1/send-sms/json';
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
 
       const response = await fetch(proxyUrl, {
         method: 'POST',
@@ -87,6 +87,11 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         })
       });
 
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Proxy sunucusu hata verdi (${response.status}): ${errText.substring(0, 100)}`);
+      }
+
       const result = await response.json();
       
       // API Yanıtını Kontrol Et
@@ -94,11 +99,11 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi kanka.`);
       } else {
         const errMsg = result?.response?.status?.message || "Bilinmeyen API hatası";
-        alert(`API Hatası: ${errMsg}\nLütfen API Anahtarını ve Hash bilgisini kontrol et.`);
+        alert(`İleti Merkezi Hatası: ${errMsg}\nLütfen API Bilgilerini (Key/Hash) kontrol et.`);
       }
     } catch (err: any) {
-      console.error("SMS Test Error:", err);
-      alert(`Bağlantı hatası kanka: ${err.message}. Lütfen internetini kontrol et veya biraz sonra tekrar dene.`);
+      console.error("SMS Test Detaylı Hata:", err);
+      alert(`Bağlantı hatası kanka: ${err.message}\n\nİpucu: Eğer hata devam ederse, internet tarayıcının çerezlerini temizleyip tekrar dene veya İleti Merkezi panelinden IP kısıtlaması olup olmadığını kontrol et.`);
     } finally {
       setIsTestingSms(false);
     }
