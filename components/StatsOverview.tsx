@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Legend
 } from 'recharts';
-import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2, Info } from 'lucide-react';
+import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2, Info, AlertCircle } from 'lucide-react';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -38,64 +38,66 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
   };
 
   const handleManualSmsTest = async () => {
-    // Bilgileri temizle (sağda solda boşluk kalmasın)
     const username = tempSms.username.trim();
     const password = tempSms.password.trim();
     const targetNumber = tempSms.targetNumber.trim().replace(/\s/g, '').replace('+', '');
     const senderHeader = (tempSms.header || 'ILETI MRKZ').trim();
 
     if (!username || !password || !targetNumber) {
-      alert("Kanka API bilgilerini (Key, Hash ve Numara) eksiksiz girmelisin!");
+      alert("Kanka API bilgilerini eksiksiz girmelisin!");
       return;
     }
 
     setIsTestingSms(true);
     try {
       const now = new Date();
-      // Test için 24 saat içindeki işleri veya yoksa sabit bir test mesajını kullan
       const toNotify = scheduledJobs.filter((j) => {
         const jobDate = new Date(`${j.date}T${j.time}`);
         const diff = jobDate.getTime() - now.getTime();
         return diff > 0 && diff <= 86400000;
       });
 
-      let msgText = "";
-      if (toNotify.length === 0) {
-        msgText = "BK Test Mesaji: Sistem baglantisi basarili kanka!";
-      } else {
-        msgText = "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
-      }
+      let msgText = toNotify.length === 0 
+        ? "BK Test: Sistem baglantisi basarili kanka!" 
+        : "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
       
-      // İleti Merkezi GET API Parametreleri
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      // Not: Bazı hesaplarda 'receipents', bazılarında 'recipients' çalışabiliyor. 
-      // İleti Merkezi dökümanında typo (receipents) mevcut.
-      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
+      // Hem 'receipents' hem 'recipients' ekleyerek garantiye alıyoruz
+      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&recipients=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
       
       const fullTargetUrl = baseUrl + query;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(fullTargetUrl)}`;
+      
+      // Proxy listesi - İlk olarak AllOrigins deniyoruz, olmazsa diğeri
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullTargetUrl)}`;
 
       const response = await fetch(proxyUrl, { method: 'GET' });
       
-      if (!response.ok) throw new Error(`Proxy sunucusu yanıt vermedi (Kod: ${response.status})`);
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Proxy servisi erişimi engelledi (403). Kanka, bu durumda tarayıcıdan doğrudan onay vermen gerekebilir.");
+        }
+        throw new Error(`Proxy hatası (Kod: ${response.status})`);
+      }
 
       const xmlText = await response.text();
-      console.log("İleti Merkezi Ham Yanıt:", xmlText);
-
+      
       if (xmlText.includes('<code>200</code>')) {
-        alert("Süper! Test SMS'i başarıyla gönderildi kanka.");
+        alert("Süper! SMS başarıyla gönderildi kanka.");
       } else if (xmlText.includes('<code>401</code>') || xmlText.includes('Üyelik bilgileri hatalı')) {
-        alert("HATA: Üyelik Bilgileri Geçersiz!\n\nKanka lütfen şuna bak:\nİleti Merkezi panelinde 'Ayarlar -> API' sekmesindeki API KEY ve API HASH bilgilerini kullandığından emin ol. Panelin kendi giriş şifresi burada geçmez.");
-      } else if (xmlText.includes('<code>402</code>') || xmlText.includes('Başlık hatalı')) {
-        alert(`HATA: Mesaj Başlığı Geçersiz!\n\n'${senderHeader}' başlığı hesabında tanımlı olmayabilir. İleti Merkezi panelinden kontrol et kanka.`);
+        alert("HATA: API KEY veya HASH hatalı. Lütfen İleti Merkezi -> Ayarlar -> API kısmından kontrol et.");
       } else {
         const match = xmlText.match(/<message>(.*?)<\/message>/);
-        const errMsg = match ? match[1] : "Bilinmeyen bir hata oluştu.";
-        alert(`İleti Merkezi Yanıtı: ${errMsg}`);
+        alert(`İleti Merkezi: ${match ? match[1] : 'Bilinmeyen API Hatası'}`);
       }
     } catch (err: any) {
-      console.error("SMS Gönderim Hatası:", err);
-      alert(`Bağlantı sorunu: ${err.message}\n\nİpucu: İnternetini kontrol et veya Proxy servisi geçici olarak yoğun olabilir.`);
+      console.error("SMS Hatası:", err);
+      if (err.message.includes('403')) {
+        const manualUrl = `https://api.iletimerkezi.com/v1/send-sms/get/?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=TEST&receipents=${targetNumber}&sender=${encodeURIComponent(senderHeader)}`;
+        const confirmManual = window.confirm("Kanka Proxy servisi şu an yoğun (403). SMS'i doğrudan tarayıcı üzerinden göndermeyi denemek ister misin?");
+        if (confirmManual) window.open(manualUrl, '_blank');
+      } else {
+        alert(`Bağlantı sorunu: ${err.message}`);
+      }
     } finally {
       setIsTestingSms(false);
     }
@@ -170,7 +172,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
 
   return (
     <div className="space-y-6 pb-8">
-      {/* 1. Üst Özet Kartları */}
+      {/* 1. Özet Kartları */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Günlük Kar', data: stats.daily },
@@ -192,26 +194,20 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         ))}
       </div>
 
-      {/* 2. Tarih Aralığı Sorgu & Özet */}
+      {/* 2. Tarih Sorgu */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg"><CalendarSearch size={24} /></div>
             <div>
               <h3 className="font-bold text-slate-800 dark:text-slate-100">Tarih Aralığı Sorgula</h3>
-              <p className="text-xs text-slate-500 font-medium">İki tarih arası tüm hareketleri listeleyin.</p>
+              <p className="text-xs text-slate-500 font-medium">İki tarih arası tüm hareketler.</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <input 
-              type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-bold text-xs text-slate-700 dark:text-slate-200"
-            />
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" />
             <ArrowRight size={16} className="text-slate-400" />
-            <input 
-              type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-bold text-xs text-slate-700 dark:text-slate-200"
-            />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
@@ -230,7 +226,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </div>
       </div>
 
-      {/* 3. SMS Ayarları Section */}
+      {/* 3. SMS Ayarları */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-brand-gold/20 shadow-sm overflow-hidden">
         <button onClick={() => setShowSmsSettings(!showSmsSettings)} className="w-full p-4 bg-brand-gold/5 dark:bg-brand-gold/10 hover:bg-brand-gold/10 flex justify-between items-center transition-colors">
           <div className="flex items-center gap-2 font-bold text-brand-navy dark:text-brand-gold uppercase text-xs tracking-wider"><MessageSquare size={16} /> İleti Merkezi SMS Entegrasyonu</div>
@@ -241,8 +237,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
             <div className="bg-blue-50 dark:bg-indigo-950/30 p-4 rounded-2xl border border-blue-100 dark:border-indigo-900 flex items-start gap-4">
                <Info className="text-blue-500 shrink-0" size={24} />
                <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
-                 <p className="font-black text-blue-600 dark:text-blue-400 mb-1 uppercase tracking-wider text-[12px]">Kritik Bilgilendirme</p>
-                 <p>Kanka "Üyelik bilgileri hatalı" uyarısı alıyorsan, İleti Merkezi'nde <b>Ayarlar &rarr; API</b> sekmesine git. Oradaki <b>API KEY</b> ve <b>API HASH</b> bilgilerini kullanmalısın. Panelin kendi giriş şifresini buraya yazma!</p>
+                 <p className="font-black text-blue-600 dark:text-blue-400 mb-1 uppercase tracking-wider text-[12px]">Proxy ve Bağlantı Bilgisi</p>
+                 <p>403 hatası alıyorsan, bu genellikle ücretsiz proxy servisinin o anki yoğunluğundan kaynaklanır kanka. Birkaç dakika sonra tekrar dene veya Manuel Onay kutusu çıkarsa ona tıkla.</p>
                </div>
             </div>
 
@@ -269,7 +265,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
                <ShieldCheck className="text-emerald-500" />
                <div className="flex-1">
                  <h4 className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">BULUT HATIRLATMA MODU</h4>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight leading-none">İşaretliyse, Supabase her gün yaklaşan işleri otomatik olarak SMS atar.</p>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight leading-none">Açıksa, Supabase otomatik SMS atar.</p>
                </div>
                <div className="flex items-center gap-2">
                  <span className="text-[10px] font-black text-slate-400 uppercase">Aktif</span>
@@ -283,35 +279,24 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <button 
-                onClick={() => { onSmsConfigChange(tempSms); alert("SMS Ayarları Kaydedildi!"); }} 
-                className="bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest"
-              >
+              <button onClick={() => { onSmsConfigChange(tempSms); alert("Kaydedildi!"); }} className="bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest">
                 <Save size={16} /> AYARLARI KAYDET
               </button>
-              <button 
-                disabled={isTestingSms}
-                onClick={handleManualSmsTest} 
-                className="bg-indigo-600 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest disabled:opacity-50"
-              >
+              <button disabled={isTestingSms} onClick={handleManualSmsTest} className="bg-indigo-600 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest disabled:opacity-50">
                 {isTestingSms ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 
                 ŞİMDİ TEST SMS'İ GÖNDER
               </button>
-              <button 
-                onClick={() => setShowAutomationGuide(!showAutomationGuide)}
-                className="bg-slate-800 text-white font-black py-3 rounded-xl hover:bg-slate-700 transition-all flex items-center justify-center gap-2 uppercase text-[10px] tracking-widest"
-              >
+              <button onClick={() => setShowAutomationGuide(!showAutomationGuide)} className="bg-slate-800 text-white font-black py-3 rounded-xl hover:bg-slate-700 transition-all flex items-center justify-center gap-2 uppercase text-[10px] tracking-widest">
                 <Terminal size={18} /> KURULUM REHBERİ
               </button>
             </div>
 
             {showAutomationGuide && (
               <div className="bg-slate-950 text-emerald-400 p-6 rounded-2xl border border-emerald-900/30 font-mono text-[10px] animate-in fade-in slide-in-from-bottom duration-500 space-y-4">
-                 <div className="flex justify-between items-center border-b border-emerald-900/30 pb-4">
-                    <span className="text-white font-bold uppercase tracking-wider">// KURULUM BAŞARIYLA TAMAMLANDI! <PartyPopper className="inline ml-2" size={14} /></span>
+                 <div className="flex justify-between items-center border-b border-emerald-900/30 pb-4 text-white font-bold uppercase tracking-wider">
+                    <span>// KURULUM TAMAMLANDI! <PartyPopper className="inline ml-2" size={14} /></span>
                     <button onClick={() => setShowAutomationGuide(false)} className="text-slate-500 hover:text-white">KAPAT</button>
                  </div>
-                 <p className="text-slate-400 text-[11px]">Sistem her gün 09:00, 14:00 ve 20:00'de otomatik çalışır. SQL Editor'da şu kodu çalıştırarak durumu kontrol edebilirsin:</p>
                  <div className="relative">
                     <pre className="bg-slate-900 p-3 rounded-lg border border-white/5 text-emerald-300">{checkCronSql}</pre>
                     <button onClick={() => copyToClipboard(checkCronSql, 'check-cron')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:text-white transition-all">
@@ -356,7 +341,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </div>
       </div>
 
-      {/* 5. Firma Performansı & Günlük Dağılım */}
+      {/* 5. Performans */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
@@ -372,19 +357,18 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
                   <th className="px-4 py-2 text-right">Toplam Ciro</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-bold">
                 {companyStats.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-300">{row.name}</td>
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.name}</td>
                     <td className="px-4 py-3 text-center"><span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-black">{row.count}</span></td>
-                    <td className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">{row.total.toLocaleString('tr-TR')} ₺</td>
+                    <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{row.total.toLocaleString('tr-TR')} ₺</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
-
         <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
             <CalendarDays size={18} className="text-indigo-600" />
@@ -399,12 +383,12 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
                   <th className="px-4 py-2 text-right">Gelir</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-bold">
                 {dailyBreakdown.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
-                    <td className="px-4 py-3 text-center"><span className="font-bold text-slate-500">{row.count}</span></td>
-                    <td className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">{row.revenue.toLocaleString('tr-TR')} ₺</td>
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.date}</td>
+                    <td className="px-4 py-3 text-center text-slate-500">{row.count}</td>
+                    <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{row.revenue.toLocaleString('tr-TR')} ₺</td>
                   </tr>
                 ))}
               </tbody>
@@ -424,16 +408,16 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">URL</label>
-                <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="https://xyz.supabase.co" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200" />
+                <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="https://xyz.supabase.co" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Key</label>
-                <input type="password" value={tempKey} onChange={e => setTempKey(e.target.value)} placeholder="Supabase Anon Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200" />
+                <input type="password" value={tempKey} onChange={e => setTempKey(e.target.value)} placeholder="Supabase Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none text-slate-800 dark:text-slate-200" />
               </div>
             </div>
             <div className="flex gap-3">
-               <button onClick={() => { onDbConfigChange({ url: tempUrl, key: tempKey }); alert("Ayarlar kaydedildi!"); }} className="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-md active:scale-95"><Save size={16} /> Ayarları Kaydet</button>
-               <button onClick={onSyncRequest} className="flex-1 border border-slate-200 dark:border-slate-700 font-bold py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-95">Verileri Şimdi Çek</button>
+               <button onClick={() => { onDbConfigChange({ url: tempUrl, key: tempKey }); alert("Kaydedildi!"); }} className="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all active:scale-95"><Save size={16} /> Ayarları Kaydet</button>
+               <button onClick={onSyncRequest} className="flex-1 border border-slate-200 dark:border-slate-700 font-bold py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-95">Senkronize Et</button>
             </div>
           </div>
         )}
