@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Legend
 } from 'recharts';
-import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2 } from 'lucide-react';
+import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2, Info } from 'lucide-react';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -41,7 +41,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
     // Bilgileri temizle (sağda solda boşluk kalmasın)
     const username = tempSms.username.trim();
     const password = tempSms.password.trim();
-    const targetNumber = tempSms.targetNumber.trim().replace(/\s/g, '');
+    const targetNumber = tempSms.targetNumber.trim().replace(/\s/g, '').replace('+', '');
+    const senderHeader = (tempSms.header || 'ILETI MRKZ').trim();
 
     if (!username || !password || !targetNumber) {
       alert("Kanka API bilgilerini (Key, Hash ve Numara) eksiksiz girmelisin!");
@@ -51,51 +52,50 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
     setIsTestingSms(true);
     try {
       const now = new Date();
+      // Test için 24 saat içindeki işleri veya yoksa sabit bir test mesajını kullan
       const toNotify = scheduledJobs.filter((j) => {
         const jobDate = new Date(`${j.date}T${j.time}`);
         const diff = jobDate.getTime() - now.getTime();
         return diff > 0 && diff <= 86400000;
       });
 
+      let msgText = "";
       if (toNotify.length === 0) {
-        alert("Kanka önümüzdeki 24 saat içinde planlanmış bir iş bulamadım. Test etmek için lütfen yarına bir iş ekle.");
-        setIsTestingSms(false);
-        return;
+        msgText = "BK Test Mesaji: Sistem baglantisi basarili kanka!";
+      } else {
+        msgText = "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
       }
-
-      const msgText = "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
       
       // İleti Merkezi GET API Parametreleri
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(tempSms.header || 'BK TURIZM')}`;
+      // Not: Bazı hesaplarda 'receipents', bazılarında 'recipients' çalışabiliyor. 
+      // İleti Merkezi dökümanında typo (receipents) mevcut.
+      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
       
       const fullTargetUrl = baseUrl + query;
-      
-      // En hızlı ve stabil proxy: corsproxy.io (Sadece URL'nin başına eklenir)
       const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(fullTargetUrl)}`;
 
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-        headers: { 'Accept': 'application/xml' }
-      });
+      const response = await fetch(proxyUrl, { method: 'GET' });
       
-      if (!response.ok) throw new Error(`Sunucu yanıt vermedi (Hata: ${response.status})`);
+      if (!response.ok) throw new Error(`Proxy sunucusu yanıt vermedi (Kod: ${response.status})`);
 
       const xmlText = await response.text();
-      console.log("API Yanıtı:", xmlText);
+      console.log("İleti Merkezi Ham Yanıt:", xmlText);
 
       if (xmlText.includes('<code>200</code>')) {
-        alert(`Tebrikler kanka! ${toNotify.length} iş için SMS başarıyla gönderildi.`);
+        alert("Süper! Test SMS'i başarıyla gönderildi kanka.");
       } else if (xmlText.includes('<code>401</code>') || xmlText.includes('Üyelik bilgileri hatalı')) {
-        alert("İleti Merkezi Hatası: Üyelik bilgileri hatalı.\n\nKanka Şunları Kontrol Et:\n1. Key ve Hash bilgilerini doğru girdiğine emin ol.\n2. İleti Merkezi panelinden 'IP Kısıtlaması' özelliğinin KAPALI olduğundan emin ol.");
+        alert("HATA: Üyelik Bilgileri Geçersiz!\n\nKanka lütfen şuna bak:\nİleti Merkezi panelinde 'Ayarlar -> API' sekmesindeki API KEY ve API HASH bilgilerini kullandığından emin ol. Panelin kendi giriş şifresi burada geçmez.");
+      } else if (xmlText.includes('<code>402</code>') || xmlText.includes('Başlık hatalı')) {
+        alert(`HATA: Mesaj Başlığı Geçersiz!\n\n'${senderHeader}' başlığı hesabında tanımlı olmayabilir. İleti Merkezi panelinden kontrol et kanka.`);
       } else {
         const match = xmlText.match(/<message>(.*?)<\/message>/);
-        const errMsg = match ? match[1] : "Bilinmeyen API Hatası";
-        alert(`İleti Merkezi Hatası: ${errMsg}`);
+        const errMsg = match ? match[1] : "Bilinmeyen bir hata oluştu.";
+        alert(`İleti Merkezi Yanıtı: ${errMsg}`);
       }
     } catch (err: any) {
-      console.error("SMS Hatası:", err);
-      alert(`Bağlantı sorunu kanka: ${err.message}. Lütfen proxy sunucusunun yoğun olabileceğini düşünerek 1-2 dakika sonra tekrar dene.`);
+      console.error("SMS Gönderim Hatası:", err);
+      alert(`Bağlantı sorunu: ${err.message}\n\nİpucu: İnternetini kontrol et veya Proxy servisi geçici olarak yoğun olabilir.`);
     } finally {
       setIsTestingSms(false);
     }
@@ -238,22 +238,22 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </button>
         {showSmsSettings && (
           <div className="p-6 space-y-6 animate-in slide-in-from-top duration-300">
-            <div className="bg-brand-navy/5 dark:bg-brand-gold/5 p-4 rounded-2xl border border-brand-gold/10">
-               <div className="flex items-center gap-3 mb-2">
-                 <CloudLightning className="text-brand-gold" />
-                 <h4 className="text-xs font-black text-brand-navy dark:text-brand-gold uppercase tracking-widest">BULUT OTOMASYONU DURUMU</h4>
+            <div className="bg-blue-50 dark:bg-indigo-950/30 p-4 rounded-2xl border border-blue-100 dark:border-indigo-900 flex items-start gap-4">
+               <Info className="text-blue-500 shrink-0" size={24} />
+               <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
+                 <p className="font-black text-blue-600 dark:text-blue-400 mb-1 uppercase tracking-wider text-[12px]">Kritik Bilgilendirme</p>
+                 <p>Kanka "Üyelik bilgileri hatalı" uyarısı alıyorsan, İleti Merkezi'nde <b>Ayarlar -> API</b> sekmesine git. Oradaki <b>API KEY</b> ve <b>API HASH</b> bilgilerini kullanmalısın. Panelin kendi giriş şifresini buraya yazma!</p>
                </div>
-               <p className="text-[10px] text-slate-500 font-bold uppercase leading-relaxed">Zamanlayıcıyı kurduysan ve altta "1" rakamını gördüysen işlem tamamdır kanka! Sistem artık otomatik.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Kullanıcı (Key)</label>
-                <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="Görseldeki 2. Satır" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API KEY" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Şifre (Hash)</label>
-                <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="Görseldeki 3. Satır" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API HASH" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">SMS Başlığı (Header)</label>
@@ -268,8 +268,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
             <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                <ShieldCheck className="text-emerald-500" />
                <div className="flex-1">
-                 <h4 className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase">Bulut Hatırlatma Modu</h4>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">Bu kutucuk işaretliyse ve API bilgileri doğruysa Supabase her gün 3 kez otomatik SMS atar.</p>
+                 <h4 className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">BULUT HATIRLATMA MODU</h4>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight leading-none">İşaretliyse, Supabase her gün yaklaşan işleri otomatik olarak SMS atar.</p>
                </div>
                <div className="flex items-center gap-2">
                  <span className="text-[10px] font-black text-slate-400 uppercase">Aktif</span>
@@ -284,7 +284,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <button 
-                onClick={() => { onSmsConfigChange(tempSms); alert("SMS Ayarları Kaydedildi ve Buluta Gönderildi!"); }} 
+                onClick={() => { onSmsConfigChange(tempSms); alert("SMS Ayarları Kaydedildi!"); }} 
                 className="bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest"
               >
                 <Save size={16} /> AYARLARI KAYDET
@@ -306,41 +306,17 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
             </div>
 
             {showAutomationGuide && (
-              <div className="bg-slate-950 text-emerald-400 p-6 rounded-2xl border border-emerald-900/30 font-mono text-[10px] animate-in fade-in slide-in-from-bottom duration-500 space-y-6">
-                 <div className="flex justify-between items-start border-b border-emerald-900/30 pb-4">
-                   <div className="flex flex-col">
+              <div className="bg-slate-950 text-emerald-400 p-6 rounded-2xl border border-emerald-900/30 font-mono text-[10px] animate-in fade-in slide-in-from-bottom duration-500 space-y-4">
+                 <div className="flex justify-between items-center border-b border-emerald-900/30 pb-4">
                     <span className="text-white font-bold uppercase tracking-wider">// KURULUM BAŞARIYLA TAMAMLANDI! <PartyPopper className="inline ml-2" size={14} /></span>
-                    <span className="text-slate-500 text-[9px]">Zamanlayıcıda "1" gördüysen sistem tıkır tıkır çalışıyor kanka.</span>
-                   </div>
-                   <button onClick={() => setShowAutomationGuide(false)} className="text-slate-500 hover:text-white">KAPAT</button>
+                    <button onClick={() => setShowAutomationGuide(false)} className="text-slate-500 hover:text-white">KAPAT</button>
                  </div>
-                 
-                 <div className="space-y-4">
-                    <div className="bg-emerald-900/10 p-4 rounded-xl border border-emerald-500/20">
-                       <p className="text-white font-bold mb-2 uppercase tracking-widest text-[11px]">Sistem Kontrol Komutu</p>
-                       <p className="text-slate-400 mb-3 italic">SQL Editor'da ("&gt;_" simgesi) bu kodu çalıştırarak aktif görevlerini görebilirsin:</p>
-                       <div className="relative">
-                          <pre className="bg-slate-900 p-3 rounded-lg border border-white/5 text-emerald-300">{checkCronSql}</pre>
-                          <button onClick={() => copyToClipboard(checkCronSql, 'check-cron')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:text-white transition-all">
-                             {copied === 'check-cron' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                          </button>
-                       </div>
-                    </div>
-
-                    <div className="bg-blue-900/10 p-4 rounded-xl border border-blue-500/20">
-                       <p className="text-white font-bold mb-1 uppercase tracking-widest text-[11px]">Nasıl Çalışacak?</p>
-                       <ul className="list-disc ml-4 space-y-1 text-slate-300">
-                          <li>Sistem her gün 09:00, 14:00 ve 20:00'de uyanır.</li>
-                          <li>24 saat içindeki yaklaşan işleri kontrol eder.</li>
-                          <li>Daha önce SMS atılmamış işleri belirler.</li>
-                          <li>Belirlenen işlerin listesini tek bir SMS ile hedefe gönderir.</li>
-                       </ul>
-                    </div>
-                 </div>
-
-                 <div className="mt-4 flex items-center gap-3 text-slate-400 bg-emerald-950/20 p-4 rounded-xl border border-emerald-900/20">
-                   <ShieldCheck size={20} className="text-emerald-500" />
-                   <p className="leading-tight text-[9px]">Veritabanı bağlantısı açık olduğu sürece bulut asistanın 7/24 çalışmaya devam eder.</p>
+                 <p className="text-slate-400 text-[11px]">Sistem her gün 09:00, 14:00 ve 20:00'de otomatik çalışır. SQL Editor'da şu kodu çalıştırarak durumu kontrol edebilirsin:</p>
+                 <div className="relative">
+                    <pre className="bg-slate-900 p-3 rounded-lg border border-white/5 text-emerald-300">{checkCronSql}</pre>
+                    <button onClick={() => copyToClipboard(checkCronSql, 'check-cron')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:text-white transition-all">
+                       {copied === 'check-cron' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    </button>
                  </div>
               </div>
             )}
@@ -348,7 +324,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         )}
       </div>
 
-      {/* 4. Gider Kalemleri Analizi */}
+      {/* 4. Gider Analizi */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
         <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2">
           <TrendingDown size={20} className="text-red-500" />
@@ -437,7 +413,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </div>
       </div>
 
-      {/* DB Ayarları Section */}
+      {/* DB Ayarları */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <button onClick={() => setShowDbSettings(!showDbSettings)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center transition-colors">
           <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 uppercase text-xs tracking-wider"><Database size={16} className="text-indigo-600" />Bulut Veritabanı Ayarları</div>
