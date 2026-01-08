@@ -6,8 +6,18 @@ interface ScheduledJobFormProps {
   onAdd: (job: { company: string; passengerName: string; from: string; to: string; fee: number; date: string; time: string }) => void;
 }
 
+const LOCATIONS = [
+  "İstanbul Havalimanı",
+  "Sabiha Gökçen Havalimanı",
+  "Yalova Mirart Otel",
+  "Yalova Hilton Otel",
+  "Yalova Elegance Otel",
+  "Tersan Tersanesi",
+  "Ev Adresleri"
+];
+
 const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState('Tersan');
   const [passengerName, setPassengerName] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -19,7 +29,7 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
     e.preventDefault();
     if (!company || !passengerName || !from || !to || !fee || !date || !time) return;
     onAdd({ company, passengerName, from, to, fee: Number(fee), date, time });
-    setCompany('');
+    setCompany('Tersan');
     setPassengerName('');
     setFrom('');
     setTo('');
@@ -71,7 +81,9 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600" size={14} />
               <input 
+                list="location-list"
                 type="text" value={from} onChange={(e) => setFrom(e.target.value)}
+                placeholder="Seç veya yaz..."
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
                 required
               />
@@ -82,12 +94,19 @@ const ScheduledJobForm: React.FC<ScheduledJobFormProps> = ({ onAdd }) => {
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600" size={14} />
               <input 
+                list="location-list"
                 type="text" value={to} onChange={(e) => setTo(e.target.value)}
+                placeholder="Seç veya yaz..."
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100"
                 required
               />
             </div>
           </div>
+          <datalist id="location-list">
+            {LOCATIONS.map((loc, idx) => (
+              <option key={idx} value={loc} />
+            ))}
+          </datalist>
         </div>
 
         <div>

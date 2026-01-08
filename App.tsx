@@ -20,7 +20,9 @@ import {
   RefreshCw,
   Moon,
   Sun,
-  Timer
+  Timer,
+  FileText,
+  CheckCircle
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType } from './types';
@@ -31,6 +33,7 @@ import ScheduledJobForm from './components/ScheduledJobForm';
 import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
+import ReportGenerator from './components/ReportGenerator';
 
 const isJobExpired = (date: string, time: string) => {
   const jobDateTime = new Date(`${date}T${time}`);
@@ -49,7 +52,7 @@ const getTimeRemaining = (date: string, time: string) => {
 };
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical'>('daily');
+  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports'>('daily');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [historicalDate, setHistoricalDate] = useState<string>(new Date(Date.now() - 86400000).toISOString().split('T')[0]);
   
@@ -198,6 +201,47 @@ const App: React.FC = () => {
     });
   };
 
+  const handleDeleteFinishedJobAction = (job: ScheduledJob) => {
+    setModalConfig({
+      isOpen: true, title: 'Kaydı Sil', message: `${job.passengerName} isimli tamamlanmış iş kaydını silmek istediğinize emin misiniz?`, confirmText: 'Sil', type: 'danger',
+      onConfirm: () => {
+        const nextFinished = finishedJobs.filter(fj => fj.id !== job.id);
+        setFinishedJobs(nextFinished);
+        triggerSync(undefined, undefined, nextFinished);
+      }
+    });
+  };
+
+  const handleDeleteJobAction = (job: Job) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'İş Kaydını Sil',
+      message: `${job.company} firmasına ait ${job.from} → ${job.to} iş kaydını silmek istediğinize emin misiniz?`,
+      confirmText: 'Sil',
+      type: 'danger',
+      onConfirm: () => {
+        const nextJobs = jobs.filter(j => j.id !== job.id);
+        setJobs(nextJobs);
+        triggerSync(nextJobs);
+      }
+    });
+  };
+
+  const handleDeleteExpenseAction = (expense: Expense) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Gider Kaydını Sil',
+      message: `${expense.type} kalemindeki ${expense.amount} ₺ tutarındaki gider kaydını silmek istediğinize emin misiniz?`,
+      confirmText: 'Sil',
+      type: 'danger',
+      onConfirm: () => {
+        const nextExpenses = expenses.filter(e => e.id !== expense.id);
+        setExpenses(nextExpenses);
+        triggerSync(undefined, undefined, undefined, nextExpenses);
+      }
+    });
+  };
+
   const addExpenses = (newExpenses: { type: ExpenseType; amount: number }[], customDate?: string) => {
     const dateObj = customDate ? new Date(customDate + 'T12:00:00') : new Date();
     const mapped: Expense[] = newExpenses.filter(e => e.amount > 0).map(e => ({ ...e, id: Math.random().toString(36).substr(2, 9), date: dateObj.toISOString() }));
@@ -206,14 +250,6 @@ const App: React.FC = () => {
       triggerSync(undefined, undefined, undefined, next);
       return next;
     });
-  };
-
-  const deleteJob = (id: string) => {
-    setJobs(prev => { const next = prev.filter(j => j.id !== id); triggerSync(next); return next; });
-  };
-
-  const deleteExpense = (id: string) => {
-    setExpenses(prev => { const next = prev.filter(e => e.id !== id); triggerSync(undefined, undefined, undefined, next); return next; });
   };
 
   return (
@@ -257,6 +293,9 @@ const App: React.FC = () => {
         </button>
         <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'scheduled' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <CalendarClock size={20} /> <span className="text-[10px] md:text-sm font-bold">İLERİ TARİH</span>
+        </button>
+        <button onClick={() => setView('reports')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'reports' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <FileText size={20} /> <span className="text-[10px] md:text-sm font-bold">RAPOR</span>
         </button>
         <button onClick={() => setView('stats')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'stats' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <Wallet size={20} /> <span className="text-[10px] md:text-sm font-bold">CİRO ANALİZ</span>
@@ -315,7 +354,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-6">
                               <div className="text-2xl font-black text-brand-navy dark:text-brand-gold">+{job.amount.toLocaleString('tr-TR')} ₺</div>
-                              <button onClick={() => deleteJob(job.id)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-all"><Trash2 size={20} /></button>
+                              <button onClick={() => handleDeleteJobAction(job)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-all"><Trash2 size={20} /></button>
                             </div>
                           </div>
                         ))}
@@ -330,7 +369,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-6">
                               <div className="text-2xl font-black text-red-600 dark:text-red-400">-{expense.amount.toLocaleString('tr-TR')} ₺</div>
-                              <button onClick={() => deleteExpense(expense.id)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-all"><Trash2 size={20} /></button>
+                              <button onClick={() => handleDeleteExpenseAction(expense)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-all"><Trash2 size={20} /></button>
                             </div>
                           </div>
                         ))}
@@ -344,41 +383,84 @@ const App: React.FC = () => {
         )}
 
         {view === 'scheduled' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-4"><ScheduledJobForm onAdd={addScheduledJob} /></div>
-            <div className="lg:col-span-8">
-              <h2 className="text-xl font-bold text-brand-navy dark:text-brand-gold mb-6 uppercase tracking-[0.2em]">PLANLI TRANSFERLER</h2>
-              {scheduledJobs.length === 0 ? (
-                <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-20 text-center border border-dashed border-brand-navy/20 dark:border-brand-gold/20 text-slate-400 font-black italic tracking-widest">BEKLEYEN RANDEVU YOK</div>
+          <div className="space-y-12">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-4"><ScheduledJobForm onAdd={addScheduledJob} /></div>
+              <div className="lg:col-span-8">
+                <h2 className="text-xl font-bold text-brand-navy dark:text-brand-gold mb-6 uppercase tracking-[0.2em] flex items-center gap-3">
+                  <CalendarClock className="text-brand-gold" size={24} />
+                  PLANLI TRANSFERLER
+                </h2>
+                {scheduledJobs.length === 0 ? (
+                  <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-20 text-center border border-dashed border-brand-navy/20 dark:border-brand-gold/20 text-slate-400 font-black italic tracking-widest">BEKLEYEN RANDEVU YOK</div>
+                ) : (
+                  <div className="space-y-4">
+                    {scheduledJobs.map(job => (
+                      <div key={job.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:shadow-xl transition-all">
+                        <div className="flex items-start gap-6">
+                          <div className="flex flex-col items-center justify-center bg-brand-navy dark:bg-brand-navy text-white p-4 rounded-[1.5rem] min-w-[85px] border border-brand-gold/30 shadow-lg">
+                            <span className="text-[10px] font-black text-brand-gold uppercase tracking-tighter">{new Date(job.date).toLocaleDateString('tr-TR', { month: 'short' })}</span>
+                            <span className="text-3xl font-black text-white">{new Date(job.date).getDate()}</span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="font-black text-slate-900 dark:text-slate-100 text-xl tracking-tight">{job.passengerName}</div>
+                              <span className="text-[10px] bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold px-3 py-1 rounded-full font-black tracking-widest uppercase">{job.company}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 font-bold"><MapPin size={16} className="text-brand-gold" /><span>{job.from} → {job.to}</span></div>
+                            <div className="flex flex-wrap items-center gap-4 mt-4">
+                               <span className="flex items-center gap-2 text-[12px] font-black text-slate-500 uppercase tracking-wider"><Clock size={14} className="text-brand-navy dark:text-brand-gold"/> {job.time}</span>
+                               <span className={`flex items-center gap-2 text-[10px] font-black px-3 py-1 rounded-full ${isJobExpired(job.date, job.time) ? 'bg-red-50 dark:bg-red-900/30 text-red-600' : 'bg-brand-gold/10 text-brand-navy dark:text-brand-gold'}`}>
+                                  <Timer size={12} /> {getTimeRemaining(job.date, job.time)}
+                               </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between md:flex-col md:items-end gap-4 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 dark:border-slate-800">
+                          <div className="text-3xl font-black text-brand-navy dark:text-brand-gold">{job.fee.toLocaleString('tr-TR')} ₺</div>
+                          <div className="flex gap-3 w-full md:w-auto">
+                            <button onClick={() => handleConfirmArrivalAction(job)} className="flex-1 md:flex-none bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy text-xs font-black px-8 py-3.5 rounded-2xl shadow-lg hover:brightness-110 transition-all active:scale-95 uppercase tracking-widest">ONAYLA</button>
+                            <button onClick={() => handleDeleteScheduledJobAction(job)} className="p-3 text-slate-300 hover:text-red-500 transition-colors bg-slate-50 dark:bg-slate-800 rounded-2xl"><Trash2 size={22} /></button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* TAMAMLANAN TRANSFERLER BÖLÜMÜ */}
+            <div className="w-full">
+              <h2 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mb-6 uppercase tracking-[0.2em] flex items-center gap-3">
+                <CheckCircle2 size={24} />
+                TAMAMLANAN TRANSFERLER
+              </h2>
+              {finishedJobs.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-20 text-center border border-dashed border-emerald-500/20 text-slate-400 font-black italic tracking-widest uppercase opacity-40">HENÜZ TAMAMLANMIŞ İŞ YOK</div>
               ) : (
                 <div className="space-y-4">
-                  {scheduledJobs.map(job => (
-                    <div key={job.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:shadow-xl transition-all">
+                  {finishedJobs.slice().reverse().map(job => (
+                    <div key={job.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] shadow-sm border border-emerald-100 dark:border-emerald-900/30 flex flex-col md:flex-row md:items-center justify-between gap-6 group transition-all opacity-80 hover:opacity-100">
                       <div className="flex items-start gap-6">
-                        <div className="flex flex-col items-center justify-center bg-brand-navy dark:bg-brand-navy text-white p-4 rounded-[1.5rem] min-w-[85px] border border-brand-gold/30 shadow-lg">
-                          <span className="text-[10px] font-black text-brand-gold uppercase tracking-tighter">{new Date(job.date).toLocaleDateString('tr-TR', { month: 'short' })}</span>
-                          <span className="text-3xl font-black text-white">{new Date(job.date).getDate()}</span>
+                        <div className="flex flex-col items-center justify-center bg-emerald-500 text-white p-4 rounded-[1.5rem] min-w-[85px] border border-white/20 shadow-lg">
+                          <CheckCircle size={20} className="mb-1" />
+                          <span className="text-[10px] font-black uppercase tracking-tighter">BİTTİ</span>
                         </div>
                         <div>
                           <div className="flex items-center gap-3 mb-2">
                             <div className="font-black text-slate-900 dark:text-slate-100 text-xl tracking-tight">{job.passengerName}</div>
-                            <span className="text-[10px] bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold px-3 py-1 rounded-full font-black tracking-widest uppercase">{job.company}</span>
+                            <span className="text-[10px] bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-full font-black tracking-widest uppercase">{job.company}</span>
                           </div>
-                          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 font-bold"><MapPin size={16} className="text-brand-gold" /><span>{job.from} → {job.to}</span></div>
-                          <div className="flex flex-wrap items-center gap-4 mt-4">
-                             <span className="flex items-center gap-2 text-[12px] font-black text-slate-500 uppercase tracking-wider"><Clock size={14} className="text-brand-navy dark:text-brand-gold"/> {job.time}</span>
-                             <span className={`flex items-center gap-2 text-[10px] font-black px-3 py-1 rounded-full ${isJobExpired(job.date, job.time) ? 'bg-red-50 dark:bg-red-900/30 text-red-600' : 'bg-brand-gold/10 text-brand-navy dark:text-brand-gold'}`}>
-                                <Timer size={12} /> {getTimeRemaining(job.date, job.time)}
-                             </span>
+                          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 font-bold"><MapPin size={16} className="text-emerald-500" /><span>{job.from} → {job.to}</span></div>
+                          <div className="flex items-center gap-4 mt-4">
+                             <span className="flex items-center gap-2 text-[12px] font-black text-slate-500 uppercase tracking-wider"><Clock size={14} className="text-emerald-500"/> {job.date} | {job.time}</span>
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center justify-between md:flex-col md:items-end gap-4 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 dark:border-slate-800">
-                        <div className="text-3xl font-black text-brand-navy dark:text-brand-gold">{job.fee.toLocaleString('tr-TR')} ₺</div>
-                        <div className="flex gap-3 w-full md:w-auto">
-                          <button onClick={() => handleConfirmArrivalAction(job)} className="flex-1 md:flex-none bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy text-xs font-black px-8 py-3.5 rounded-2xl shadow-lg hover:brightness-110 transition-all active:scale-95 uppercase tracking-widest">ONAYLA</button>
-                          <button onClick={() => handleDeleteScheduledJobAction(job)} className="p-3 text-slate-300 hover:text-red-500 transition-colors bg-slate-50 dark:bg-slate-800 rounded-2xl"><Trash2 size={22} /></button>
-                        </div>
+                        <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{job.fee.toLocaleString('tr-TR')} ₺</div>
+                        <button onClick={() => handleDeleteFinishedJobAction(job)} className="p-3 text-slate-300 hover:text-red-500 transition-colors bg-slate-50 dark:bg-slate-800 rounded-2xl"><Trash2 size={22} /></button>
                       </div>
                     </div>
                   ))}
@@ -386,6 +468,10 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
+        )}
+
+        {view === 'reports' && (
+          <ReportGenerator scheduledJobs={scheduledJobs} finishedJobs={finishedJobs} />
         )}
 
         {view === 'stats' && (
