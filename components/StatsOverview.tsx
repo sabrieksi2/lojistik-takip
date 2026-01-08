@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Legend
 } from 'recharts';
-import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper } from 'lucide-react';
+import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2 } from 'lucide-react';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -18,12 +18,13 @@ interface StatsOverviewProps {
   onSyncRequest: () => void;
 }
 
-const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig, smsConfig, onDbConfigChange, onSmsConfigChange, onSyncRequest }) => {
+const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduledJobs, dbConfig, smsConfig, onDbConfigChange, onSmsConfigChange, onSyncRequest }) => {
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showDbSettings, setShowDbSettings] = useState(false);
   const [showSmsSettings, setShowSmsSettings] = useState(false);
   const [showAutomationGuide, setShowAutomationGuide] = useState(false);
+  const [isTestingSms, setIsTestingSms] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   
   const [tempUrl, setTempUrl] = useState(dbConfig.url);
@@ -31,10 +32,60 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
   const [tempSms, setTempSms] = useState<SmsConfig>(smsConfig);
 
   const copyToClipboard = (text: string, id: string) => {
-    // FIX: Changed WriteText to writeText
     navigator.clipboard.writeText(text);
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleManualSmsTest = async () => {
+    if (!tempSms.username || !tempSms.password || !tempSms.targetNumber) {
+      alert("Kanka önce API bilgilerini (Anahtar, Hash ve Hedef Numara) girmelisin!");
+      return;
+    }
+
+    setIsTestingSms(true);
+    try {
+      const now = new Date();
+      // Gelecek 24 saat içindeki işleri filtrele
+      const toNotify = scheduledJobs.filter((j) => {
+        const jobDate = new Date(`${j.date}T${j.time}`);
+        const diff = jobDate.getTime() - now.getTime();
+        return diff > 0 && diff <= 86400000;
+      });
+
+      if (toNotify.length === 0) {
+        alert("Kanka önümüzdeki 24 saat içinde planlanmış bir iş bulamadım, o yüzden SMS gönderilmedi. Test etmek için yarına bir iş ekleyebilirsin.");
+        setIsTestingSms(false);
+        return;
+      }
+
+      const msg = "BK Test Hatirlatma:\n" + toNotify.map((j) => `${j.date} ${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
+      
+      const response = await fetch('https://api.iletimerkezi.com/v1/send-sms/json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request: {
+            authentication: { username: tempSms.username, password: tempSms.password },
+            order: { 
+              sender: tempSms.header || 'BK TURIZM', 
+              message: { text: msg, receipents: { number: [tempSms.targetNumber] } } 
+            }
+          }
+        })
+      });
+
+      const result = await response.json();
+      if (result.response?.status?.code === '200') {
+        alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi.`);
+      } else {
+        alert(`Hata kanka: ${result.response?.status?.message || 'Bilinmeyen bir hata oluştu.'}`);
+      }
+    } catch (err: any) {
+      alert(`Bağlantı hatası: ${err.message}`);
+    } finally {
+      setIsTestingSms(false);
+    }
   };
 
   const getExpenseByType = (expenseList: Expense[]) => {
@@ -101,52 +152,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, dbConfig,
       historical: getPeriodStats(startOfRange, endOfRange)
     };
   }, [jobs, expenses, startDate, endDate]);
-
-  const edgeFunctionCode = `import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
-
-Deno.serve(async (req) => {
-  try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const supabase = createClient(supabaseUrl, supabaseKey)
-
-    const { data: dbRow, error: fetchError } = await supabase
-      .from('logistics_db').select('data').eq('id', 1).single()
-
-    if (fetchError || !dbRow) return new Response("DB not found", { status: 404 })
-
-    const { scheduledJobs = [], smsConfig, smsLogs = [] } = dbRow.data
-    if (!smsConfig?.autoSend) return new Response("SMS disabled", { status: 200 })
-
-    const trNow = new Date(new Date().getTime() + (3 * 60 * 60 * 1000))
-    const todayStr = trNow.toISOString().split('T')[0]
-    const currentHour = trNow.getHours()
-    let slot = currentHour >= 13 && currentHour < 19 ? 'afternoon' : (currentHour >= 19 || currentHour < 8 ? 'evening' : 'morning')
-
-    const toNotify = scheduledJobs.filter((j: any) => {
-      const diff = new Date(\`\${j.date}T\${j.time}\`).getTime() - trNow.getTime()
-      return diff > 0 && diff <= 86400000 && !smsLogs.some((l: any) => l.jobId === j.id && l.slot === slot && l.date === todayStr)
-    })
-
-    if (toNotify.length === 0) return new Response("No jobs", { status: 200 })
-
-    const msg = "BK Hatirlatma:\\n" + toNotify.map((j: any) => \`\${j.date} \${j.time}: \${j.passengerName} (\${j.from}-\${j.to})\`).join('\\n')
-    await fetch('https://api.iletimerkezi.com/v1/send-sms/json', {
-      method: 'POST',
-      body: JSON.stringify({
-        request: {
-          authentication: { username: smsConfig.username, password: smsConfig.password },
-          order: { sender: smsConfig.header, message: { text: msg, receipents: { number: [smsConfig.targetNumber] } } }
-        }
-      })
-    })
-
-    const updatedData = { ...dbRow.data, smsLogs: [...smsLogs, ...toNotify.map((j: any) => ({ jobId: j.id, slot, date: todayStr }))] }
-    await supabase.from('logistics_db').update({ data: updatedData }).eq('id', 1)
-
-    return new Response("Success", { status: 200 })
-  } catch (err: any) { return new Response(err.message, { status: 500 }) }
-})`;
 
   const checkCronSql = `select * from cron.job;`;
 
@@ -230,20 +235,20 @@ Deno.serve(async (req) => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Kullanıcı</label>
-                <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="E-posta" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Kullanıcı (Key)</label>
+                <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="Görseldeki 2. Satır" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Şifre</label>
-                <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API Şifreniz" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Şifre (Hash)</label>
+                <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="Görseldeki 3. Satır" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">SMS Başlığı</label>
-                <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="BK LOJISTIK" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">SMS Başlığı (Header)</label>
+                <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="BK TURIZM" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Hedef Numara</label>
-                <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="530XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="534XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
               </div>
             </div>
 
@@ -264,18 +269,26 @@ Deno.serve(async (req) => {
                </div>
             </div>
 
-            <div className="flex gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <button 
                 onClick={() => { onSmsConfigChange(tempSms); alert("SMS Ayarları Kaydedildi ve Buluta Gönderildi!"); }} 
-                className="flex-1 bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-xs tracking-widest"
+                className="bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest"
               >
-                <Save size={16} /> AYARLARI BULUTA KAYDET
+                <Save size={16} /> AYARLARI KAYDET
+              </button>
+              <button 
+                disabled={isTestingSms}
+                onClick={handleManualSmsTest} 
+                className="bg-indigo-600 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest disabled:opacity-50"
+              >
+                {isTestingSms ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 
+                ŞİMDİ TEST SMS'İ GÖNDER
               </button>
               <button 
                 onClick={() => setShowAutomationGuide(!showAutomationGuide)}
-                className="px-4 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition-all flex items-center justify-center"
+                className="bg-slate-800 text-white font-black py-3 rounded-xl hover:bg-slate-700 transition-all flex items-center justify-center gap-2 uppercase text-[10px] tracking-widest"
               >
-                <Terminal size={18} />
+                <Terminal size={18} /> KURULUM REHBERİ
               </button>
             </div>
 
