@@ -61,28 +61,44 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
 
       const msg = "BK Test Hatirlatma:\n" + toNotify.map((j) => `${j.date} ${j.time}: ${j.passengerName} (${j.from}-${j.to})`).join('\n');
       
-      const response = await fetch('https://api.iletimerkezi.com/v1/send-sms/json', {
+      // CORS hatasını aşmak için köprü (proxy) ekliyoruz
+      const targetUrl = 'https://api.iletimerkezi.com/v1/send-sms/json';
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+
+      const response = await fetch(proxyUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
           request: {
-            authentication: { username: tempSms.username, password: tempSms.password },
+            authentication: { 
+              username: tempSms.username, 
+              password: tempSms.password 
+            },
             order: { 
               sender: tempSms.header || 'BK TURIZM', 
-              message: { text: msg, receipents: { number: [tempSms.targetNumber] } } 
+              message: { 
+                text: msg, 
+                recipients: { number: [tempSms.targetNumber] } 
+              } 
             }
           }
         })
       });
 
       const result = await response.json();
-      if (result.response?.status?.code === '200') {
-        alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi.`);
+      
+      // API Yanıtını Kontrol Et
+      if (result?.response?.status?.code === '200' || result?.response?.status?.code === 200) {
+        alert(`Süper! ${toNotify.length} iş için test SMS'i başarıyla gönderildi kanka.`);
       } else {
-        alert(`Hata kanka: ${result.response?.status?.message || 'Bilinmeyen bir hata oluştu.'}`);
+        const errMsg = result?.response?.status?.message || "Bilinmeyen API hatası";
+        alert(`API Hatası: ${errMsg}\nLütfen API Anahtarını ve Hash bilgisini kontrol et.`);
       }
     } catch (err: any) {
-      alert(`Bağlantı hatası: ${err.message}`);
+      console.error("SMS Test Error:", err);
+      alert(`Bağlantı hatası kanka: ${err.message}. Lütfen internetini kontrol et veya biraz sonra tekrar dene.`);
     } finally {
       setIsTestingSms(false);
     }
