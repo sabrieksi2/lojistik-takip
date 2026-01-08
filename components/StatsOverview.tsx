@@ -242,7 +242,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
                <Info className="text-blue-500 shrink-0" size={24} />
                <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
                  <p className="font-black text-blue-600 dark:text-blue-400 mb-1 uppercase tracking-wider text-[12px]">Kritik Bilgilendirme</p>
-                 <p>Kanka "Üyelik bilgileri hatalı" uyarısı alıyorsan, İleti Merkezi'nde <b>Ayarlar -> API</b> sekmesine git. Oradaki <b>API KEY</b> ve <b>API HASH</b> bilgilerini kullanmalısın. Panelin kendi giriş şifresini buraya yazma!</p>
+                 <p>Kanka "Üyelik bilgileri hatalı" uyarısı alıyorsan, İleti Merkezi'nde <b>Ayarlar &rarr; API</b> sekmesine git. Oradaki <b>API KEY</b> ve <b>API HASH</b> bilgilerini kullanmalısın. Panelin kendi giriş şifresini buraya yazma!</p>
                </div>
             </div>
 
