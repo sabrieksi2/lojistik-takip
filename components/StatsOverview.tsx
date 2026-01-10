@@ -4,7 +4,7 @@ import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig } from '../type
 import { 
   CalendarSearch, Database, ShieldCheck, Send, Loader2, Info, RefreshCw, MessageCircle, 
   ChevronDown, ChevronUp, Wallet, TrendingUp, TrendingDown, Receipt, Activity, Building2, CalendarDays,
-  ArrowRight
+  ArrowRight, X, ArrowRightLeft, Trash2, Edit2, Check, Save
 } from 'lucide-react';
 
 interface StatsOverviewProps {
@@ -35,12 +35,19 @@ const getTimeRemaining = (date: string, time: string) => {
 
 const StatsOverview: React.FC<StatsOverviewProps> = ({ 
   jobs, expenses, scheduledJobs, dbConfig, tgConfig, 
-  onDbConfigChange, onTgConfigChange, onSyncRequest
+  onDbConfigChange, onTgConfigChange, onSyncRequest,
+  onDeleteJob, onDeleteExpense, onUpdateJob, onUpdateExpense
 }) => {
   const [customStartDate, setCustomStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [customEndDate, setCustomEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showSettings, setShowSettings] = useState(false);
   const [isTestingBot, setIsTestingBot] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+
+  // Edit states for Modal
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<any>(null);
 
   // Form states for settings
   const [tempUrl, setTempUrl] = useState(dbConfig.url);
@@ -101,6 +108,15 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
       .sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
   }, [jobs]);
 
+  const dayDetailData = useMemo(() => {
+    if (!selectedDay) return null;
+    const dayJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === selectedDay);
+    const dayExpenses = expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === selectedDay);
+    const rev = dayJobs.reduce((s, j) => s + j.amount, 0);
+    const exp = dayExpenses.reduce((s, e) => s + e.amount, 0);
+    return { jobs: dayJobs, expenses: dayExpenses, revenue: rev, expense: exp, profit: rev - exp };
+  }, [selectedDay, jobs, expenses]);
+
   const companyStats = useMemo(() => {
     const data: Record<string, { count: number; total: number }> = {};
     jobs.forEach(job => {
@@ -158,6 +174,32 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     finally { setIsTestingBot(false); }
   };
 
+  const startJobEdit = (job: Job) => {
+    setEditingJobId(job.id);
+    setEditBuffer({ ...job });
+  };
+
+  const saveJobEdit = () => {
+    if (editBuffer) {
+      onUpdateJob(editBuffer);
+      setEditingJobId(null);
+      setEditBuffer(null);
+    }
+  };
+
+  const startExpenseEdit = (expense: Expense) => {
+    setEditingExpenseId(expense.id);
+    setEditBuffer({ ...expense });
+  };
+
+  const saveExpenseEdit = () => {
+    if (editBuffer) {
+      onUpdateExpense(editBuffer);
+      setEditingExpenseId(null);
+      setEditBuffer(null);
+    }
+  };
+
   const Card = ({ title, stats }: { title: string, stats: any }) => (
     <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
       <div className="flex justify-between items-start mb-4">
@@ -182,6 +224,123 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Günlük Detay Modalı */}
+      {selectedDay && dayDetailData && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 animate-in zoom-in-95">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+              <div className="flex items-center gap-3">
+                <CalendarDays className="text-brand-gold" size={24} />
+                <h3 className="font-black text-slate-800 dark:text-slate-100 text-lg uppercase tracking-widest">{selectedDay} Günlük Detay</h3>
+              </div>
+              <button onClick={() => { setSelectedDay(null); setEditingJobId(null); setEditingExpenseId(null); }} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-all">
+                <X size={24} className="text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              {/* Özet Satırı */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-900/20">
+                  <span className="text-[10px] font-black text-emerald-600 uppercase block">TOPLAM GELİR</span>
+                  <span className="text-xl font-black text-emerald-600">{dayDetailData.revenue.toLocaleString('tr-TR')} ₺</span>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-2xl border border-red-100 dark:border-red-900/20">
+                  <span className="text-[10px] font-black text-red-600 uppercase block">TOPLAM GİDER</span>
+                  <span className="text-xl font-black text-red-600">{dayDetailData.expense.toLocaleString('tr-TR')} ₺</span>
+                </div>
+                <div className="bg-brand-gold/10 p-4 rounded-2xl border border-brand-gold/20">
+                  <span className="text-[10px] font-black text-brand-gold uppercase block">NET KAR</span>
+                  <span className="text-xl font-black text-brand-gold">{dayDetailData.profit.toLocaleString('tr-TR')} ₺</span>
+                </div>
+              </div>
+
+              {/* İşler Listesi */}
+              <div>
+                <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <ArrowRightLeft size={16} /> GELİR HAREKETLERİ ({dayDetailData.jobs.length})
+                </h4>
+                <div className="space-y-3">
+                  {dayDetailData.jobs.map(job => (
+                    <div key={job.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 group">
+                      {editingJobId === job.id ? (
+                        <div className="flex flex-col md:flex-row gap-3 w-full">
+                          <input type="text" value={editBuffer.from} onChange={e => setEditBuffer({...editBuffer, from: e.target.value})} className="flex-1 px-3 py-1 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none" placeholder="Nereden" />
+                          <input type="text" value={editBuffer.to} onChange={e => setEditBuffer({...editBuffer, to: e.target.value})} className="flex-1 px-3 py-1 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none" placeholder="Nereye" />
+                          <input type="number" value={editBuffer.amount} onChange={e => setEditBuffer({...editBuffer, amount: Number(e.target.value)})} className="w-24 px-3 py-1 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none font-bold" placeholder="Tutar" />
+                          <div className="flex gap-1">
+                            <button onClick={saveJobEdit} className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"><Check size={16} /></button>
+                            <button onClick={() => setEditingJobId(null)} className="p-2 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded-lg"><X size={16} /></button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1">
+                            <div className="font-bold text-slate-800 dark:text-slate-100">{job.from} → {job.to}</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase">{job.company} • {new Date(job.date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
+                          </div>
+                          <div className="flex items-center gap-4 mt-2 md:mt-0">
+                            <div className="font-black text-emerald-600">+{job.amount.toLocaleString('tr-TR')} ₺</div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => startJobEdit(job)} className="p-2 text-slate-400 hover:text-brand-navy dark:hover:text-brand-gold transition-colors"><Edit2 size={16} /></button>
+                              <button onClick={() => onDeleteJob(job)} className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {dayDetailData.jobs.length === 0 && <p className="text-center py-4 text-xs text-slate-400 italic">İş kaydı bulunmuyor.</p>}
+                </div>
+              </div>
+
+              {/* Giderler Listesi */}
+              <div>
+                <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <TrendingDown size={16} /> GİDER HAREKETLERİ ({dayDetailData.expenses.length})
+                </h4>
+                <div className="space-y-3">
+                  {dayDetailData.expenses.map(exp => (
+                    <div key={exp.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 group">
+                      {editingExpenseId === exp.id ? (
+                        <div className="flex flex-col md:flex-row gap-3 w-full">
+                          <select value={editBuffer.type} onChange={e => setEditBuffer({...editBuffer, type: e.target.value as ExpenseType})} className="flex-1 px-3 py-1 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none">
+                            <option value="Köprü">Köprü</option>
+                            <option value="Gemi">Gemi</option>
+                            <option value="Yakıt">Yakıt</option>
+                            <option value="Diğer">Diğer</option>
+                          </select>
+                          <input type="number" value={editBuffer.amount} onChange={e => setEditBuffer({...editBuffer, amount: Number(e.target.value)})} className="w-24 px-3 py-1 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none font-bold" placeholder="Tutar" />
+                          <div className="flex gap-1">
+                            <button onClick={saveExpenseEdit} className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"><Check size={16} /></button>
+                            <button onClick={() => setEditingExpenseId(null)} className="p-2 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded-lg"><X size={16} /></button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1">
+                            <div className="font-bold text-slate-800 dark:text-slate-100">{exp.type}</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase">{new Date(exp.date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
+                          </div>
+                          <div className="flex items-center gap-4 mt-2 md:mt-0">
+                            <div className="font-black text-red-600">-{exp.amount.toLocaleString('tr-TR')} ₺</div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => startExpenseEdit(exp)} className="p-2 text-slate-400 hover:text-brand-navy dark:hover:text-brand-gold transition-colors"><Edit2 size={16} /></button>
+                              <button onClick={() => onDeleteExpense(exp)} className="p-2 text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {dayDetailData.expenses.length === 0 && <p className="text-center py-4 text-xs text-slate-400 italic">Gider kaydı bulunmuyor.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Üst Özet Kartları */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card title="Günlük Kar" stats={daily} />
@@ -242,8 +401,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {dailyBreakdown.map(row => (
-                <tr key={row.date} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-6 py-4 font-bold text-indigo-600 underline cursor-pointer">{row.date}</td>
+                <tr key={row.date} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-all cursor-pointer group" onClick={() => setSelectedDay(row.rawDate)}>
+                  <td className="px-6 py-4 font-bold text-indigo-600 underline decoration-indigo-200 group-hover:text-brand-gold">{row.date}</td>
                   <td className="px-6 py-4 text-center font-bold text-slate-600 dark:text-slate-400">{row.count}</td>
                   <td className="px-6 py-4 text-right font-black text-emerald-600">{row.revenue.toLocaleString('tr-TR')} ₺</td>
                 </tr>
