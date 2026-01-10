@@ -36,16 +36,13 @@ export interface Stats {
   profit: number;
 }
 
-export interface SmsConfig {
-  username: string;
-  password: string;
-  header: string;
-  targetNumber: string;
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
   autoSend: boolean;
 }
 
-export interface SmsLog {
-  jobId: string;
-  slot: 'morning' | 'afternoon' | 'evening' | 'test';
+export interface TelegramLog {
   date: string; // YYYY-MM-DD
+  slot: 'morning' | 'noon' | 'evening';
 }
