@@ -2,10 +2,8 @@
 import React, { useMemo, useState } from 'react';
 import { Job, ScheduledJob, Expense, ExpenseType, SmsConfig } from '../types';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Legend
-} from 'recharts';
-import { DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, Wallet, MessageSquare, ShieldCheck, Terminal, CloudLightning, Copy, Check, ExternalLink, PartyPopper, Send, Loader2, Info, AlertCircle } from 'lucide-react';
+  DollarSign, CalendarSearch, CalendarDays, Database, Save, Building2, TrendingDown, ArrowRight, MessageSquare, ShieldCheck, Terminal, Copy, Check, Send, Loader2, Info, Trash2, Edit3, X, MapPin, Clock, Fuel, ArrowRightLeft
+} from 'lucide-react';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -16,9 +14,17 @@ interface StatsOverviewProps {
   onDbConfigChange: (config: { url: string; key: string }) => void;
   onSmsConfigChange: (config: SmsConfig) => void;
   onSyncRequest: () => void;
+  onDeleteJob: (job: Job) => void;
+  onDeleteExpense: (expense: Expense) => void;
+  onUpdateJob: (job: Job) => void;
+  onUpdateExpense: (expense: Expense) => void;
 }
 
-const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduledJobs, dbConfig, smsConfig, onDbConfigChange, onSmsConfigChange, onSyncRequest }) => {
+const StatsOverview: React.FC<StatsOverviewProps> = ({ 
+  jobs, expenses, scheduledJobs, dbConfig, smsConfig, 
+  onDbConfigChange, onSmsConfigChange, onSyncRequest,
+  onDeleteJob, onDeleteExpense, onUpdateJob, onUpdateExpense
+}) => {
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showDbSettings, setShowDbSettings] = useState(false);
@@ -27,6 +33,10 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
   const [isTestingSms, setIsTestingSms] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   
+  // Detay Modalı State
+  const [selectedDayData, setSelectedDayData] = useState<{ date: string; displayDate: string } | null>(null);
+  const [editingItem, setEditingItem] = useState<{ type: 'job' | 'expense'; data: any } | null>(null);
+
   const [tempUrl, setTempUrl] = useState(dbConfig.url);
   const [tempKey, setTempKey] = useState(dbConfig.key);
   const [tempSms, setTempSms] = useState<SmsConfig>(smsConfig);
@@ -62,42 +72,21 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         : "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
       
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      // Hem 'receipents' hem 'recipients' ekleyerek garantiye alıyoruz
       const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&recipients=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
-      
       const fullTargetUrl = baseUrl + query;
-      
-      // Proxy listesi - İlk olarak AllOrigins deniyoruz, olmazsa diğeri
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullTargetUrl)}`;
 
       const response = await fetch(proxyUrl, { method: 'GET' });
-      
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Proxy servisi erişimi engelledi (403). Kanka, bu durumda tarayıcıdan doğrudan onay vermen gerekebilir.");
-        }
-        throw new Error(`Proxy hatası (Kod: ${response.status})`);
-      }
+      if (!response.ok) throw new Error(`Proxy hatası (Kod: ${response.status})`);
 
       const xmlText = await response.text();
-      
       if (xmlText.includes('<code>200</code>')) {
         alert("Süper! SMS başarıyla gönderildi kanka.");
-      } else if (xmlText.includes('<code>401</code>') || xmlText.includes('Üyelik bilgileri hatalı')) {
-        alert("HATA: API KEY veya HASH hatalı. Lütfen İleti Merkezi -> Ayarlar -> API kısmından kontrol et.");
       } else {
-        const match = xmlText.match(/<message>(.*?)<\/message>/);
-        alert(`İleti Merkezi: ${match ? match[1] : 'Bilinmeyen API Hatası'}`);
+        alert("SMS Gönderilemedi. Lütfen ayarları kontrol et.");
       }
     } catch (err: any) {
-      console.error("SMS Hatası:", err);
-      if (err.message.includes('403')) {
-        const manualUrl = `https://api.iletimerkezi.com/v1/send-sms/get/?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=TEST&receipents=${targetNumber}&sender=${encodeURIComponent(senderHeader)}`;
-        const confirmManual = window.confirm("Kanka Proxy servisi şu an yoğun (403). SMS'i doğrudan tarayıcı üzerinden göndermeyi denemek ister misin?");
-        if (confirmManual) window.open(manualUrl, '_blank');
-      } else {
-        alert(`Bağlantı sorunu: ${err.message}`);
-      }
+      alert(`Bağlantı sorunu: ${err.message}`);
     } finally {
       setIsTestingSms(false);
     }
@@ -125,15 +114,16 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
   };
 
   const dailyBreakdown = useMemo(() => {
-    const groups: Record<string, { count: number; revenue: number }> = {};
+    const groups: Record<string, { count: number; revenue: number; rawDate: string }> = {};
     jobs.forEach(job => {
-      const dateKey = new Date(job.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      if (!groups[dateKey]) groups[dateKey] = { count: 0, revenue: 0 };
-      groups[dateKey].count += 1;
-      groups[dateKey].revenue += job.amount;
+      const isoDate = new Date(job.date).toISOString().split('T')[0];
+      const displayDate = new Date(job.date).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (!groups[displayDate]) groups[displayDate] = { count: 0, revenue: 0, rawDate: isoDate };
+      groups[displayDate].count += 1;
+      groups[displayDate].revenue += job.amount;
     });
     return Object.entries(groups).map(([date, data]) => ({ date, ...data }))
-      .sort((a, b) => new Date(b.date.split('.').reverse().join('-')).getTime() - new Date(a.date.split('.').reverse().join('-')).getTime());
+      .sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
   }, [jobs]);
 
   const companyStats = useMemo(() => {
@@ -168,7 +158,21 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
     };
   }, [jobs, expenses, startDate, endDate]);
 
-  const checkCronSql = `select * from cron.job;`;
+  const filteredDayData = useMemo(() => {
+    if (!selectedDayData) return { jobs: [], expenses: [] };
+    return {
+      jobs: jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === selectedDayData.date),
+      expenses: expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === selectedDayData.date)
+    };
+  }, [selectedDayData, jobs, expenses]);
+
+  const handleUpdateItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    if (editingItem.type === 'job') onUpdateJob(editingItem.data);
+    else onUpdateExpense(editingItem.data);
+    setEditingItem(null);
+  };
 
   return (
     <div className="space-y-6 pb-8">
@@ -194,125 +198,10 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         ))}
       </div>
 
-      {/* 2. Tarih Sorgu */}
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg"><CalendarSearch size={24} /></div>
-            <div>
-              <h3 className="font-bold text-slate-800 dark:text-slate-100">Tarih Aralığı Sorgula</h3>
-              <p className="text-xs text-slate-500 font-medium">İki tarih arası tüm hareketler.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" />
-            <ArrowRight size={16} className="text-slate-400" />
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-          <div className="bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
-            <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-1 uppercase">Aralık Geliri</div>
-            <div className="text-2xl font-black text-emerald-700 dark:text-emerald-300">{stats.historical.revenue.toLocaleString('tr-TR')} ₺</div>
-          </div>
-          <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-100 dark:border-red-900/30">
-            <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-1 uppercase">Aralık Gideri</div>
-            <div className="text-2xl font-black text-red-700 dark:text-red-300">{stats.historical.expenseTotal.toLocaleString('tr-TR')} ₺</div>
-          </div>
-          <div className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
-            <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1 uppercase">Aralık Net Kar</div>
-            <div className="text-2xl font-black text-indigo-700 dark:text-indigo-300">{stats.historical.profit.toLocaleString('tr-TR')} ₺</div>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. SMS Ayarları */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-brand-gold/20 shadow-sm overflow-hidden">
-        <button onClick={() => setShowSmsSettings(!showSmsSettings)} className="w-full p-4 bg-brand-gold/5 dark:bg-brand-gold/10 hover:bg-brand-gold/10 flex justify-between items-center transition-colors">
-          <div className="flex items-center gap-2 font-bold text-brand-navy dark:text-brand-gold uppercase text-xs tracking-wider"><MessageSquare size={16} /> İleti Merkezi SMS Entegrasyonu</div>
-          <span className="text-xs text-brand-gold font-black">{showSmsSettings ? 'Kapat' : 'Yapılandır'}</span>
-        </button>
-        {showSmsSettings && (
-          <div className="p-6 space-y-6 animate-in slide-in-from-top duration-300">
-            <div className="bg-blue-50 dark:bg-indigo-950/30 p-4 rounded-2xl border border-blue-100 dark:border-indigo-900 flex items-start gap-4">
-               <Info className="text-blue-500 shrink-0" size={24} />
-               <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
-                 <p className="font-black text-blue-600 dark:text-blue-400 mb-1 uppercase tracking-wider text-[12px]">Proxy ve Bağlantı Bilgisi</p>
-                 <p>403 hatası alıyorsan, bu genellikle ücretsiz proxy servisinin o anki yoğunluğundan kaynaklanır kanka. Birkaç dakika sonra tekrar dene veya Manuel Onay kutusu çıkarsa ona tıkla.</p>
-               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Kullanıcı (Key)</label>
-                <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API KEY" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">API Şifre (Hash)</label>
-                <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API HASH" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">SMS Başlığı (Header)</label>
-                <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="BK TURIZM" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Hedef Numara</label>
-                <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="534XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-               <ShieldCheck className="text-emerald-500" />
-               <div className="flex-1">
-                 <h4 className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">BULUT HATIRLATMA MODU</h4>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight leading-none">Açıksa, Supabase otomatik SMS atar.</p>
-               </div>
-               <div className="flex items-center gap-2">
-                 <span className="text-[10px] font-black text-slate-400 uppercase">Aktif</span>
-                 <input 
-                    type="checkbox" 
-                    checked={tempSms.autoSend} 
-                    onChange={e => setTempSms(prev => ({...prev, autoSend: e.target.checked}))}
-                    className="w-5 h-5 accent-brand-gold cursor-pointer"
-                 />
-               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <button onClick={() => { onSmsConfigChange(tempSms); alert("Kaydedildi!"); }} className="bg-brand-gold text-brand-navy font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest">
-                <Save size={16} /> AYARLARI KAYDET
-              </button>
-              <button disabled={isTestingSms} onClick={handleManualSmsTest} className="bg-indigo-600 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest disabled:opacity-50">
-                {isTestingSms ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 
-                ŞİMDİ TEST SMS'İ GÖNDER
-              </button>
-              <button onClick={() => setShowAutomationGuide(!showAutomationGuide)} className="bg-slate-800 text-white font-black py-3 rounded-xl hover:bg-slate-700 transition-all flex items-center justify-center gap-2 uppercase text-[10px] tracking-widest">
-                <Terminal size={18} /> KURULUM REHBERİ
-              </button>
-            </div>
-
-            {showAutomationGuide && (
-              <div className="bg-slate-950 text-emerald-400 p-6 rounded-2xl border border-emerald-900/30 font-mono text-[10px] animate-in fade-in slide-in-from-bottom duration-500 space-y-4">
-                 <div className="flex justify-between items-center border-b border-emerald-900/30 pb-4 text-white font-bold uppercase tracking-wider">
-                    <span>// KURULUM TAMAMLANDI! <PartyPopper className="inline ml-2" size={14} /></span>
-                    <button onClick={() => setShowAutomationGuide(false)} className="text-slate-500 hover:text-white">KAPAT</button>
-                 </div>
-                 <div className="relative">
-                    <pre className="bg-slate-900 p-3 rounded-lg border border-white/5 text-emerald-300">{checkCronSql}</pre>
-                    <button onClick={() => copyToClipboard(checkCronSql, 'check-cron')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:text-white transition-all">
-                       {copied === 'check-cron' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    </button>
-                 </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 4. Gider Analizi */}
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-        <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2">
-          <TrendingDown size={20} className="text-red-500" />
+      {/* 2. Gider Kalemleri Analizi (Geri Getirilen Kısım) */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors overflow-hidden">
+        <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2 uppercase tracking-widest text-xs">
+          <TrendingDown size={18} className="text-red-500" />
           Gider Kalemleri Analizi
         </h3>
         <div className="overflow-x-auto">
@@ -341,52 +230,35 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </div>
       </div>
 
-      {/* 5. Performans */}
+      {/* 3. Günlük Dağılım Tablosu (Etkileşimli) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
-            <Building2 size={18} className="text-emerald-600" />
-            <h3 className="font-bold text-slate-800 dark:text-slate-100">Firma Bazlı Raporlama</h3>
-          </div>
-          <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full text-left">
-              <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase">
-                <tr>
-                  <th className="px-4 py-2">Firma</th>
-                  <th className="px-4 py-2 text-center">İş Adeti</th>
-                  <th className="px-4 py-2 text-right">Toplam Ciro</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-bold">
-                {companyStats.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.name}</td>
-                    <td className="px-4 py-3 text-center"><span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-black">{row.count}</span></td>
-                    <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{row.total.toLocaleString('tr-TR')} ₺</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
-            <CalendarDays size={18} className="text-indigo-600" />
-            <h3 className="font-bold text-slate-800 dark:text-slate-100">Günlük İş Dağılımı</h3>
+        <div className="lg:col-span-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays size={18} className="text-indigo-600" />
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 uppercase tracking-widest text-xs">Günlük İş Dağılımı</h3>
+            </div>
+            <span className="text-[9px] font-bold text-slate-400 italic">Tarihe tıklayarak o günün detaylarını görebilirsin kanka.</span>
           </div>
           <div className="max-h-[400px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase">
                 <tr>
                   <th className="px-4 py-2">Tarih</th>
-                  <th className="px-4 py-2 text-center">Adet</th>
-                  <th className="px-4 py-2 text-right">Gelir</th>
+                  <th className="px-4 py-2 text-center">İş Adeti</th>
+                  <th className="px-4 py-2 text-right">Toplam Gelir</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-bold">
                 {dailyBreakdown.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.date}</td>
+                  <tr 
+                    key={idx} 
+                    onClick={() => setSelectedDayData({ date: row.rawDate, displayDate: row.date })}
+                    className="hover:bg-brand-gold/5 dark:hover:bg-brand-gold/10 cursor-pointer transition-colors group"
+                  >
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-brand-gold flex items-center gap-2 underline decoration-indigo-200 dark:decoration-brand-gold/30 underline-offset-4">
+                       {row.date}
+                    </td>
                     <td className="px-4 py-3 text-center text-slate-500">{row.count}</td>
                     <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{row.revenue.toLocaleString('tr-TR')} ₺</td>
                   </tr>
@@ -397,31 +269,240 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({ jobs, expenses, scheduled
         </div>
       </div>
 
-      {/* DB Ayarları */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <button onClick={() => setShowDbSettings(!showDbSettings)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center transition-colors">
-          <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 uppercase text-xs tracking-wider"><Database size={16} className="text-indigo-600" />Bulut Veritabanı Ayarları</div>
-          <span className="text-xs text-indigo-600 font-bold">{showDbSettings ? 'Kapat' : 'Yapılandır'}</span>
-        </button>
-        {showDbSettings && (
-          <div className="p-6 space-y-6 animate-in slide-in-from-top duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">URL</label>
-                <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="https://xyz.supabase.co" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 mb-1 uppercase">Key</label>
-                <input type="password" value={tempKey} onChange={e => setTempKey(e.target.value)} placeholder="Supabase Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none text-slate-800 dark:text-slate-200" />
-              </div>
-            </div>
-            <div className="flex gap-3">
-               <button onClick={() => { onDbConfigChange({ url: tempUrl, key: tempKey }); alert("Kaydedildi!"); }} className="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all active:scale-95"><Save size={16} /> Ayarları Kaydet</button>
-               <button onClick={onSyncRequest} className="flex-1 border border-slate-200 dark:border-slate-700 font-bold py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-95">Senkronize Et</button>
+      {/* 4. Tarih Sorgu */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg"><CalendarSearch size={24} /></div>
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100">Özel Tarih Aralığı</h3>
+              <p className="text-xs text-slate-500 font-medium tracking-tight">İstediğin iki tarih arası toplam rapor.</p>
             </div>
           </div>
-        )}
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none" />
+            <ArrowRight size={16} className="text-slate-400" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 outline-none" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+          <div className="bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
+            <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-1 uppercase">Gelir</div>
+            <div className="text-2xl font-black text-emerald-700 dark:text-emerald-300">{stats.historical.revenue.toLocaleString('tr-TR')} ₺</div>
+          </div>
+          <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-100 dark:border-red-900/30">
+            <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-1 uppercase">Gider</div>
+            <div className="text-2xl font-black text-red-700 dark:text-red-300">{stats.historical.expenseTotal.toLocaleString('tr-TR')} ₺</div>
+          </div>
+          <div className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
+            <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1 uppercase">Net Kar</div>
+            <div className="text-2xl font-black text-indigo-700 dark:text-indigo-300">{stats.historical.profit.toLocaleString('tr-TR')} ₺</div>
+          </div>
+        </div>
       </div>
+
+      {/* 5. Firma Performansı */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+          <Building2 size={18} className="text-emerald-600" />
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 uppercase tracking-widest text-xs">Firma Bazlı Raporlama</h3>
+        </div>
+        <div className="max-h-[400px] overflow-y-auto">
+          <table className="w-full text-left">
+            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase">
+              <tr>
+                <th className="px-4 py-2">Firma</th>
+                <th className="px-4 py-2 text-center">Adet</th>
+                <th className="px-4 py-2 text-right">Toplam Ciro</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-bold">
+              {companyStats.map((row, idx) => (
+                <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.name}</td>
+                  <td className="px-4 py-3 text-center"><span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-black">{row.count}</span></td>
+                  <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{row.total.toLocaleString('tr-TR')} ₺</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 6. Ayarlar */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-brand-gold/20 shadow-sm overflow-hidden h-fit">
+          <button onClick={() => setShowSmsSettings(!showSmsSettings)} className="w-full p-4 bg-brand-gold/5 dark:bg-brand-gold/10 hover:bg-brand-gold/10 flex justify-between items-center transition-colors">
+            <div className="flex items-center gap-2 font-bold text-brand-navy dark:text-brand-gold uppercase text-[10px] tracking-wider"><MessageSquare size={16} /> SMS Entegrasyonu</div>
+            <span className="text-[10px] text-brand-gold font-black">{showSmsSettings ? 'Kapat' : 'Yapılandır'}</span>
+          </button>
+          {showSmsSettings && (
+            <div className="p-5 space-y-4 animate-in slide-in-from-top duration-300">
+               <div className="grid grid-cols-1 gap-3">
+                  <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API KEY" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API HASH" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Hedef Numara" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+               </div>
+               <div className="flex items-center gap-2">
+                 <input type="checkbox" checked={tempSms.autoSend} onChange={e => setTempSms(prev => ({...prev, autoSend: e.target.checked}))} />
+                 <span className="text-[10px] font-black uppercase text-slate-400">Otomatik SMS Aktif</span>
+               </div>
+               <div className="flex flex-col gap-2">
+                 <button onClick={() => onSmsConfigChange(tempSms)} className="w-full bg-brand-gold text-brand-navy font-black py-2 rounded-xl text-[10px] tracking-widest uppercase">AYARLARI KAYDET</button>
+                 <button disabled={isTestingSms} onClick={handleManualSmsTest} className="w-full bg-indigo-600 text-white font-black py-2 rounded-xl text-[10px] tracking-widest uppercase disabled:opacity-50">
+                   {isTestingSms ? <Loader2 size={12} className="animate-spin mx-auto" /> : "TEST SMS GÖNDER"}
+                 </button>
+               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-fit">
+          <button onClick={() => setShowDbSettings(!showDbSettings)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center transition-colors">
+            <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider"><Database size={16} className="text-indigo-600" />Bulut Veritabanı</div>
+            <span className="text-[10px] text-indigo-600 font-bold">{showDbSettings ? 'Kapat' : 'Yapılandır'}</span>
+          </button>
+          {showDbSettings && (
+            <div className="p-5 space-y-4 animate-in slide-in-from-top duration-300">
+               <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="Supabase URL" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+               <input type="password" value={tempKey} onChange={e => setTempKey(e.target.value)} placeholder="Supabase Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+               <div className="flex gap-2">
+                 <button onClick={() => onDbConfigChange({ url: tempUrl, key: tempKey })} className="flex-1 bg-indigo-600 text-white font-black py-2 rounded-xl text-[10px] tracking-widest uppercase">KAYDET</button>
+                 <button onClick={onSyncRequest} className="flex-1 border border-slate-200 dark:border-slate-700 font-black py-2 rounded-xl text-[10px] tracking-widest uppercase">YENİLE</button>
+               </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* DETAY MODALLARI (GÜNLÜK VE DÜZENLEME) */}
+      {selectedDayData && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-brand-gold/30">
+            <div className="p-6 bg-brand-navy dark:bg-brand-gold flex justify-between items-center border-b border-white/10 dark:border-brand-navy/10">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/10 rounded-xl"><CalendarDays className="text-brand-gold dark:text-brand-navy" /></div>
+                <div>
+                   <h3 className="text-lg font-black text-white dark:text-brand-navy uppercase tracking-widest">{selectedDayData.displayDate} Detayları</h3>
+                   <p className="text-[10px] text-brand-goldLight dark:text-brand-navy/60 font-bold">O güne ait tüm iş ve gider hareketleri.</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedDayData(null)} className="p-2 hover:bg-white/10 dark:hover:bg-brand-navy/10 rounded-full transition-all text-white dark:text-brand-navy"><X size={24} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50 dark:bg-slate-950/50">
+               {/* İşler Listesi */}
+               <section>
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-2"><ArrowRightLeft size={14} /> GÜNÜN İŞLERİ ({filteredDayData.jobs.length})</h4>
+                  <div className="space-y-3">
+                    {filteredDayData.jobs.map(job => (
+                      <div key={job.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm">
+                        <div className="flex gap-4 items-center">
+                          <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-brand-gold rounded-xl"><MapPin size={18} /></div>
+                          <div>
+                             <div className="font-black text-slate-800 dark:text-slate-100 text-sm">{job.from} → {job.to}</div>
+                             <div className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
+                               {job.company} • <Clock size={10} /> {new Date(job.date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                             </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                           <div className="text-lg font-black text-emerald-600 dark:text-brand-gold">{job.amount.toLocaleString('tr-TR')} ₺</div>
+                           <div className="flex gap-2">
+                              <button onClick={() => setEditingItem({ type: 'job', data: { ...job } })} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg"><Edit3 size={16} /></button>
+                              <button onClick={() => onDeleteJob(job)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"><Trash2 size={16} /></button>
+                           </div>
+                        </div>
+                      </div>
+                    ))}
+                    {filteredDayData.jobs.length === 0 && <p className="text-center text-[10px] font-bold text-slate-400 py-4 italic uppercase tracking-widest opacity-40">O GÜN İŞ YAPILMAMIŞ</p>}
+                  </div>
+               </section>
+
+               {/* Giderler Listesi */}
+               <section>
+                  <h4 className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-2"><Fuel size={14} /> GÜNÜN GİDERLERİ ({filteredDayData.expenses.length})</h4>
+                  <div className="space-y-3">
+                    {filteredDayData.expenses.map(exp => (
+                      <div key={exp.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm">
+                        <div className="flex gap-4 items-center">
+                          <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-xl"><Fuel size={18} /></div>
+                          <div>
+                             <div className="font-black text-slate-800 dark:text-slate-100 text-sm">{exp.type} GİDERİ</div>
+                             <div className="text-[10px] font-bold text-slate-400 uppercase">
+                               <Clock size={10} className="inline mr-1" /> {new Date(exp.date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                             </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                           <div className="text-lg font-black text-red-600">-{exp.amount.toLocaleString('tr-TR')} ₺</div>
+                           <div className="flex gap-2">
+                              <button onClick={() => setEditingItem({ type: 'expense', data: { ...exp } })} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg"><Edit3 size={16} /></button>
+                              <button onClick={() => onDeleteExpense(exp)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"><Trash2 size={16} /></button>
+                           </div>
+                        </div>
+                      </div>
+                    ))}
+                    {filteredDayData.expenses.length === 0 && <p className="text-center text-[10px] font-bold text-slate-400 py-4 italic uppercase tracking-widest opacity-40">O GÜN GİDER GİRİLMEMİŞ</p>}
+                  </div>
+               </section>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+               <button onClick={() => setSelectedDayData(null)} className="w-full bg-slate-900 dark:bg-brand-gold text-white dark:text-brand-navy font-black py-4 rounded-2xl uppercase tracking-widest text-xs">PENCEREYİ KAPAT</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingItem && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in zoom-in-95 duration-200">
+           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-2xl w-full max-w-md border border-brand-gold/40">
+              <h3 className="text-xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                <Edit3 size={20} /> Kayıt Düzenle
+              </h3>
+              <form onSubmit={handleUpdateItem} className="space-y-4">
+                 {editingItem.type === 'job' ? (
+                   <>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Firma</label>
+                        <input type="text" value={editingItem.data.company} onChange={e => setEditingItem({ ...editingItem, data: { ...editingItem.data, company: e.target.value }})} className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-bold outline-none" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Kalkış</label>
+                          <input type="text" value={editingItem.data.from} onChange={e => setEditingItem({ ...editingItem, data: { ...editingItem.data, from: e.target.value }})} className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-bold outline-none" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Varış</label>
+                          <input type="text" value={editingItem.data.to} onChange={e => setEditingItem({ ...editingItem, data: { ...editingItem.data, to: e.target.value }})} className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-bold outline-none" />
+                        </div>
+                      </div>
+                   </>
+                 ) : (
+                   <div>
+                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Gider Türü</label>
+                     <select value={editingItem.data.type} onChange={e => setEditingItem({ ...editingItem, data: { ...editingItem.data, type: e.target.value }})} className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-bold outline-none">
+                        <option value="Köprü">Köprü</option>
+                        <option value="Gemi">Gemi</option>
+                        <option value="Yakıt">Yakıt</option>
+                        <option value="Diğer">Diğer</option>
+                     </select>
+                   </div>
+                 )}
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Tutar (₺)</label>
+                    <input type="number" value={editingItem.data.amount} onChange={e => setEditingItem({ ...editingItem, data: { ...editingItem.data, amount: Number(e.target.value) }})} className="w-full px-4 py-3 bg-white dark:bg-slate-900 border-2 border-brand-gold rounded-xl font-black text-xl text-brand-navy dark:text-brand-gold outline-none" />
+                 </div>
+                 <div className="flex gap-3 pt-4">
+                    <button type="button" onClick={() => setEditingItem(null)} className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-xl uppercase text-xs">VAZGEÇ</button>
+                    <button type="submit" className="flex-1 py-3 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black rounded-xl uppercase text-xs shadow-lg">GÜNCELLE</button>
+                 </div>
+              </form>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 };

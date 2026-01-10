@@ -24,7 +24,8 @@ import {
   FileText,
   CheckCircle,
   MessageSquare,
-  Bell
+  Bell,
+  Anchor
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType, SmsConfig, SmsLog } from './types';
@@ -119,7 +120,6 @@ const App: React.FC = () => {
         setScheduledJobs(cloudData.scheduledJobs || []);
         setFinishedJobs(cloudData.finishedJobs || []);
         setExpenses(cloudData.expenses || []);
-        // Cloud'da saklanan SMS ayarlarını da çekiyoruz
         if (cloudData.smsConfig) setSmsConfig(cloudData.smsConfig);
         if (cloudData.smsLogs) setSmsLogs(cloudData.smsLogs);
 
@@ -189,6 +189,22 @@ const App: React.FC = () => {
     setJobs(prev => {
       const next = [newJob, ...prev].sort((a, b) => b.timestamp - a.timestamp);
       triggerSync(next);
+      return next;
+    });
+  };
+
+  const updateJob = (updatedJob: Job) => {
+    setJobs(prev => {
+      const next = prev.map(j => j.id === updatedJob.id ? updatedJob : j);
+      triggerSync(next);
+      return next;
+    });
+  };
+
+  const updateExpense = (updatedExpense: Expense) => {
+    setExpenses(prev => {
+      const next = prev.map(e => e.id === updatedExpense.id ? updatedExpense : e);
+      triggerSync(undefined, undefined, undefined, next);
       return next;
     });
   };
@@ -287,7 +303,7 @@ const App: React.FC = () => {
     <div className="min-h-screen transition-colors duration-300">
       <ConfirmationModal isOpen={modalConfig.isOpen} onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} onConfirm={modalConfig.onConfirm} title={modalConfig.title} message={modalConfig.message} confirmText={modalConfig.confirmText} type={modalConfig.type} />
 
-      {/* Header Bar - BK Branding */}
+      {/* Header Bar */}
       <div className={`text-white px-4 py-2 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-lg transition-all duration-500 z-[100] ${isCloudActive ? (syncFlash ? 'bg-brand-gold scale-[1.01]' : 'bg-brand-navy') : 'bg-slate-800'}`}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center border border-brand-gold/30">
@@ -327,7 +343,7 @@ const App: React.FC = () => {
           <CalendarPlus size={20} /> <span className="text-[10px] md:text-sm font-bold">GEÇMİŞ</span>
         </button>
         <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'scheduled' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-          <CalendarClock size={20} /> <span className="text-[10px] md:text-sm font-bold">İLERİ TARİH</span>
+          <CalendarClock size={20} /> <span className="text-[10px] md:text-sm font-bold">TERSAN</span>
         </button>
         <button onClick={() => setView('reports')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'reports' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <FileText size={20} /> <span className="text-[10px] md:text-sm font-bold">RAPOR</span>
@@ -340,7 +356,6 @@ const App: React.FC = () => {
       <main className="max-w-6xl mx-auto px-4 pt-4 md:pt-40 pb-24 md:pb-8">
         {(view === 'daily' || view === 'historical') && (
           <div className="flex flex-col gap-10">
-            {/* Üst Kısım: Formlar (Yatay ve Üst Üste) */}
             <div className="flex flex-col gap-6">
               {view === 'historical' && (
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-brand-gold/30 max-w-md mx-auto w-full">
@@ -348,17 +363,14 @@ const App: React.FC = () => {
                   <input type="date" value={historicalDate} onChange={(e) => setHistoricalDate(e.target.value)} className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-gold outline-none font-bold text-slate-700 dark:text-slate-200" />
                 </div>
               )}
-              
               <div className="w-full">
                 <JobForm onAdd={(data) => addJob(data, view === 'historical' ? historicalDate : undefined)} title={view === 'historical' ? "Geçmiş İş Girişi" : "Günlük İş Girişi"} companies={uniqueCompanies} />
               </div>
-              
               <div className="w-full">
                 <ExpenseForm onAdd={(data) => addExpenses(data, view === 'historical' ? historicalDate : undefined)} title={view === 'historical' ? "Geçmiş Giderler" : "Günlük Giderler"} />
               </div>
             </div>
 
-            {/* Alt Kısım: Hareketler Listesi (Yatay ve En Altta) */}
             <div className="w-full">
               <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
@@ -465,7 +477,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* TAMAMLANAN TRANSFERLER BÖLÜMÜ */}
             <div className="w-full">
               <h2 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mb-6 uppercase tracking-[0.2em] flex items-center gap-3">
                 <CheckCircle2 size={24} />
@@ -518,7 +529,11 @@ const App: React.FC = () => {
             dbConfig={dbConfig} 
             smsConfig={smsConfig}
             onSmsConfigChange={handleSmsConfigUpdate}
-            onSyncRequest={() => pullFromCloud()} 
+            onSyncRequest={() => pullFromCloud()}
+            onDeleteJob={handleDeleteJobAction}
+            onDeleteExpense={handleDeleteExpenseAction}
+            onUpdateJob={updateJob}
+            onUpdateExpense={updateExpense}
           />
         )}
       </main>
