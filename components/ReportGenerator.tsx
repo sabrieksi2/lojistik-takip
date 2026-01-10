@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { FileText, Download, Settings2, Save, Check, MapPinned, Clock, FileType, CheckSquare, Square } from 'lucide-react';
+import { FileText, Download, Settings2, Save, Check, MapPinned, Clock, FileType, CheckSquare, Square, Plus, Trash2, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { ScheduledJob } from '../types';
@@ -12,6 +12,12 @@ interface ReportGeneratorProps {
 
 type WorkModel = 'ist-pickup' | 'ist-dropoff' | 'saw' | 'manual';
 
+interface ExtraItem {
+  id: string;
+  name: string;
+  fee: number;
+}
+
 interface ManualConfig {
   service: boolean;
   ferry: boolean;
@@ -19,6 +25,7 @@ interface ManualConfig {
   marmara: boolean;
   osmangazi: boolean;
   parking: boolean;
+  extras: ExtraItem[];
 }
 
 const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finishedJobs }) => {
@@ -60,17 +67,58 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
     if (model === 'manual' && !manualConfigs[jobId]) {
       setManualConfigs(prev => ({
         ...prev,
-        [jobId]: { service: true, ferry: false, yss: false, marmara: false, osmangazi: false, parking: false }
+        [jobId]: { 
+          service: true, 
+          ferry: false, 
+          yss: false, 
+          marmara: false, 
+          osmangazi: false, 
+          parking: false,
+          extras: []
+        }
       }));
     }
   };
 
-  const toggleManualParam = (jobId: string, param: keyof ManualConfig) => {
+  const toggleManualParam = (jobId: string, param: keyof Omit<ManualConfig, 'extras'>) => {
     setManualConfigs(prev => ({
       ...prev,
       [jobId]: {
         ...prev[jobId],
         [param]: !prev[jobId][param]
+      }
+    }));
+  };
+
+  const addExtraItem = (jobId: string) => {
+    setManualConfigs(prev => ({
+      ...prev,
+      [jobId]: {
+        ...prev[jobId],
+        extras: [
+          ...prev[jobId].extras,
+          { id: Math.random().toString(36).substr(2, 9), name: '', fee: 0 }
+        ]
+      }
+    }));
+  };
+
+  const updateExtraItem = (jobId: string, extraId: string, updates: Partial<ExtraItem>) => {
+    setManualConfigs(prev => ({
+      ...prev,
+      [jobId]: {
+        ...prev[jobId],
+        extras: prev[jobId].extras.map(item => item.id === extraId ? { ...item, ...updates } : item)
+      }
+    }));
+  };
+
+  const removeExtraItem = (jobId: string, extraId: string) => {
+    setManualConfigs(prev => ({
+      ...prev,
+      [jobId]: {
+        ...prev[jobId],
+        extras: prev[jobId].extras.filter(item => item.id !== extraId)
       }
     }));
   };
@@ -127,7 +175,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       `;
       await renderElementToPdf(headerHtml);
 
-      let grandTotalService = 0, grandTotalFerry = 0, grandTotalYss = 0, grandTotalMarmara = 0, grandTotalOsmangazi = 0, grandTotalParking = 0;
+      let grandTotalService = 0, grandTotalFerry = 0, grandTotalYss = 0, grandTotalMarmara = 0, grandTotalOsmangazi = 0, grandTotalParking = 0, grandTotalExtras = 0;
 
       for (const job of allRelevantJobs) {
         const model = jobConfigs[job.id] || 'ist-pickup';
@@ -135,7 +183,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         let costs = [];
         let subTotal = 0;
 
-        const addCost = (key: keyof ManualConfig, label: string) => {
+        const addCost = (key: keyof Omit<ManualConfig, 'extras'>, label: string) => {
           const val = Number(fixedFees[key as keyof typeof fixedFees]);
           subTotal += val;
           costs.push(`${label}: ${val} TL`);
@@ -155,6 +203,14 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
           if (cfg.marmara) addCost('marmara', 'K.Marmara');
           if (cfg.osmangazi) addCost('osmangazi', 'Osmangazi');
           if (cfg.parking) addCost('parking', 'Otopark');
+          
+          // Extras logic for PDF
+          cfg.extras.forEach(extra => {
+            const extraFee = Number(extra.fee) || 0;
+            subTotal += extraFee;
+            grandTotalExtras += extraFee;
+            costs.push(`${extra.name || 'Ekstra'}: ${extraFee} TL`);
+          });
         } else {
           // Standard Models
           addCost('service', 'Hizmet');
@@ -182,7 +238,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         await renderElementToPdf(jobHtml);
       }
 
-      const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking;
+      const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking + grandTotalExtras;
       const vatAmount = totalSummary * 0.20;
       const grandTotalWithVat = totalSummary + vatAmount;
 
@@ -195,7 +251,8 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
             <tr><td style="padding: 6px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam Kuzey Marmara Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam Osmangazi Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalOsmangazi.toLocaleString('tr-TR')} TL</td></tr>
-            <tr><td style="padding: 6px 0; border-bottom: 1px solid #cbd5e1;">Toplam Otopark Ücreti</td><td style="text-align: right; font-weight: bold; border-bottom: 1px solid #cbd5e1;">${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam Otopark Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalParking.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0; border-bottom: 1px solid #cbd5e1;">Toplam Ekstra Sefer Giderleri</td><td style="text-align: right; font-weight: bold; border-bottom: 1px solid #cbd5e1;">${grandTotalExtras.toLocaleString('tr-TR')} TL</td></tr>
             <tr style="color: #334155;"><td style="padding: 12px 0 5px; font-weight: 700;">MATRAH (ARA TOPLAM)</td><td style="text-align: right; padding: 12px 0 5px; font-weight: 800;">${totalSummary.toLocaleString('tr-TR')} TL</td></tr>
             <tr style="color: #64748b; font-size: 11pt;"><td style="padding: 5px 0;">KDV (%20)</td><td style="text-align: right; padding: 5px 0;">${vatAmount.toLocaleString('tr-TR')} TL</td></tr>
             <tr style="border-top: 3px solid #0a192f;"><td style="padding: 20px 0 0; font-weight: 900; font-size: 16pt; color: #0a192f;">GENEL TOPLAM (KDV DAHİL)</td><td style="text-align: right; padding: 20px 0 0; font-weight: 900; font-size: 18pt; color: #d4af37;">${grandTotalWithVat.toLocaleString('tr-TR')} TL</td></tr>
@@ -324,7 +381,9 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                         <div className="text-[10px] font-black text-brand-gold uppercase mb-3 tracking-widest flex items-center gap-2">
                           <Settings2 size={12} /> Manuel Parametre Seçimi
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                        
+                        {/* Standart Kalemler */}
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
                           {[
                             { key: 'service', label: 'Hizmet' },
                             { key: 'ferry', label: 'Gemi' },
@@ -335,13 +394,59 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                           ].map((item) => (
                             <button 
                               key={item.key}
-                              onClick={() => toggleManualParam(job.id, item.key as keyof ManualConfig)}
-                              className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-tighter ${manualConfigs[job.id]?.[item.key as keyof ManualConfig] ? 'bg-brand-navy text-white border-brand-navy dark:bg-brand-gold dark:text-brand-navy dark:border-brand-gold' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-brand-gold/50'}`}
+                              onClick={() => toggleManualParam(job.id, item.key as keyof Omit<ManualConfig, 'extras'>)}
+                              className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-tighter ${manualConfigs[job.id]?.[item.key as keyof Omit<ManualConfig, 'extras'>] ? 'bg-brand-navy text-white border-brand-navy dark:bg-brand-gold dark:text-brand-navy dark:border-brand-gold' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-brand-gold/50'}`}
                             >
-                              {manualConfigs[job.id]?.[item.key as keyof ManualConfig] ? <CheckSquare size={14} /> : <Square size={14} />}
+                              {manualConfigs[job.id]?.[item.key as keyof Omit<ManualConfig, 'extras'>] ? <CheckSquare size={14} /> : <Square size={14} />}
                               {item.label}
                             </button>
                           ))}
+                        </div>
+
+                        {/* Ekstra Kalemler Bölümü */}
+                        <div className="border-t border-brand-gold/20 pt-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ekstra Kalemler (Bekleme, Yemek vb.)</span>
+                            <button 
+                              onClick={() => addExtraItem(job.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-gold text-brand-navy text-[9px] font-black rounded-lg hover:brightness-110 active:scale-95 transition-all"
+                            >
+                              <Plus size={12} /> YENİ KALEM EKLE
+                            </button>
+                          </div>
+                          
+                          <div className="space-y-3">
+                            {manualConfigs[job.id]?.extras.map((extra) => (
+                              <div key={extra.id} className="flex items-center gap-2 animate-in slide-in-from-left-2 duration-200">
+                                <input 
+                                  type="text" 
+                                  value={extra.name}
+                                  onChange={(e) => updateExtraItem(job.id, extra.id, { name: e.target.value })}
+                                  placeholder="Kalem Adı (örn: Ekstra Bekleme)"
+                                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[10px] font-bold outline-none focus:ring-1 focus:ring-brand-gold"
+                                />
+                                <div className="relative w-32">
+                                  <input 
+                                    type="number" 
+                                    value={extra.fee || ''}
+                                    onChange={(e) => updateExtraItem(job.id, extra.id, { fee: Number(e.target.value) })}
+                                    placeholder="Tutar"
+                                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[10px] font-black outline-none focus:ring-1 focus:ring-brand-gold pr-6"
+                                  />
+                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-black opacity-30">₺</span>
+                                </div>
+                                <button 
+                                  onClick={() => removeExtraItem(job.id, extra.id)}
+                                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                            {manualConfigs[job.id]?.extras.length === 0 && (
+                              <p className="text-[9px] font-medium text-slate-400 italic">Henüz ekstra kalem eklenmedi.</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
