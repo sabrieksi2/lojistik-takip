@@ -53,43 +53,35 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     const senderHeader = (tempSms.header || 'ILETI MRKZ').trim();
 
     if (!username || !password || !targetNumber) {
-      alert("Kanka API bilgilerini eksiksiz girmelisin! (API Key, API Hash ve Numara)");
+      alert("Kanka API bilgilerini eksiksiz girmelisin!");
       return;
     }
 
     setIsTestingSms(true);
     try {
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const toNotify = scheduledJobs.filter(j => j.date === todayStr);
-
-      let msgText = toNotify.length === 0 
-        ? "BK Test: Sistem baglantisi basarili kanka! Su an listede bugunluk is yok." 
-        : "BK Hatirlatma (Bugun):\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
+      const msgText = "BK Lojistik Sistem Testi: Baglanti basarili kanka!";
       
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      // Hem recipients hem receipents gönderiyoruz, hangisi geçerliyse o çalışsın
-      const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&recipients=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
-      const fullTargetUrl = baseUrl + query;
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullTargetUrl)}`;
+      const queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
+      
+      // ÇÖZÜM: corsproxy.io kullanarak tarayıcı engelini aşıyoruz
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl + '?' + queryParams)}`;
 
       const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error(`Proxy sunucusu yanıt vermiyor (Durum: ${response.status})`);
+      if (!response.ok) throw new Error(`Bağlantı başarısız (Status: ${response.status})`);
 
       const xmlText = await response.text();
       
-      const codeMatch = xmlText.match(/<code>(.*?)<\/code>/);
-      const messageMatch = xmlText.match(/<message>(.*?)<\/message>/);
-      const errorCode = codeMatch ? codeMatch[1] : 'Bilinmiyor';
-      const errorMessage = messageMatch ? messageMatch[1] : 'Yanıt ayrıştırılamadı';
-
-      if (errorCode === '200') {
-        alert("Süper! SMS başarıyla gönderildi kanka.");
+      if (xmlText.includes('<code>200</code>')) {
+        alert("Süper! Test SMS başarıyla gönderildi.");
       } else {
-        alert(`SMS Gönderilemedi kanka!\n\nHata Kodu: ${errorCode}\nMesaj: ${errorMessage}\n\nİpucu: API Key/Hash yanlış olabilir veya başlık (Sender) panelde onaylı değildir.`);
+        const codeMatch = xmlText.match(/<code>(.*?)<\/code>/);
+        const msgMatch = xmlText.match(/<message>(.*?)<\/message>/);
+        alert(`SMS Hatası:\nKod: ${codeMatch ? codeMatch[1] : 'Bilinmiyor'}\nMesaj: ${msgMatch ? msgMatch[1] : 'Hata ayrıştırılamadı'}`);
       }
     } catch (err: any) {
-      alert(`Bağlantı sorunu kanka: ${err.message}\nİnternetini veya Proxy durumunu kontrol et.`);
+      console.error("SMS Fetch Hatası:", err);
+      alert(`Bağlantı koptu kanka. İnternetini kontrol et veya Proxy servisi o anlık kapalı olabilir.\n\nDetay: ${err.message}`);
     } finally {
       setIsTestingSms(false);
     }
@@ -339,19 +331,19 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                <div className="grid grid-cols-1 gap-3">
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Key</label>
-                    <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="Örn: 507XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Hash (Şifre)</label>
-                    <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API Şifresi" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API Hash" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Bildirim Gidecek Numara</label>
-                    <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Örn: 0532XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Örn: 532XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Gönderen Başlığı (Header)</label>
-                    <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="Onaylı Başlığınız" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="Başlık" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                </div>
                <div className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
