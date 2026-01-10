@@ -33,7 +33,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [isTestingSms, setIsTestingSms] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   
-  // Detay Modalı State
   const [selectedDayData, setSelectedDayData] = useState<{ date: string; displayDate: string } | null>(null);
   const [editingItem, setEditingItem] = useState<{ type: 'job' | 'expense'; data: any } | null>(null);
 
@@ -54,39 +53,43 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     const senderHeader = (tempSms.header || 'ILETI MRKZ').trim();
 
     if (!username || !password || !targetNumber) {
-      alert("Kanka API bilgilerini eksiksiz girmelisin!");
+      alert("Kanka API bilgilerini eksiksiz girmelisin! (API Key, API Hash ve Numara)");
       return;
     }
 
     setIsTestingSms(true);
     try {
       const now = new Date();
-      const toNotify = scheduledJobs.filter((j) => {
-        const jobDate = new Date(`${j.date}T${j.time}`);
-        const diff = jobDate.getTime() - now.getTime();
-        return diff > 0 && diff <= 86400000;
-      });
+      const todayStr = now.toISOString().split('T')[0];
+      const toNotify = scheduledJobs.filter(j => j.date === todayStr);
 
       let msgText = toNotify.length === 0 
-        ? "BK Test: Sistem baglantisi basarili kanka!" 
-        : "BK Hatirlatma:\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
+        ? "BK Test: Sistem baglantisi basarili kanka! Su an listede bugunluk is yok." 
+        : "BK Hatirlatma (Bugun):\n" + toNotify.map((j) => `${j.time}: ${j.passengerName}`).join('\n');
       
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
+      // Hem recipients hem receipents gönderiyoruz, hangisi geçerliyse o çalışsın
       const query = `?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&recipients=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
       const fullTargetUrl = baseUrl + query;
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullTargetUrl)}`;
 
-      const response = await fetch(proxyUrl, { method: 'GET' });
-      if (!response.ok) throw new Error(`Proxy hatası (Kod: ${response.status})`);
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error(`Proxy sunucusu yanıt vermiyor (Durum: ${response.status})`);
 
       const xmlText = await response.text();
-      if (xmlText.includes('<code>200</code>')) {
+      
+      const codeMatch = xmlText.match(/<code>(.*?)<\/code>/);
+      const messageMatch = xmlText.match(/<message>(.*?)<\/message>/);
+      const errorCode = codeMatch ? codeMatch[1] : 'Bilinmiyor';
+      const errorMessage = messageMatch ? messageMatch[1] : 'Yanıt ayrıştırılamadı';
+
+      if (errorCode === '200') {
         alert("Süper! SMS başarıyla gönderildi kanka.");
       } else {
-        alert("SMS Gönderilemedi. Lütfen ayarları kontrol et.");
+        alert(`SMS Gönderilemedi kanka!\n\nHata Kodu: ${errorCode}\nMesaj: ${errorMessage}\n\nİpucu: API Key/Hash yanlış olabilir veya başlık (Sender) panelde onaylı değildir.`);
       }
     } catch (err: any) {
-      alert(`Bağlantı sorunu: ${err.message}`);
+      alert(`Bağlantı sorunu kanka: ${err.message}\nİnternetini veya Proxy durumunu kontrol et.`);
     } finally {
       setIsTestingSms(false);
     }
@@ -198,7 +201,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         ))}
       </div>
 
-      {/* 2. Gider Kalemleri Analizi (Geri Getirilen Kısım) */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors overflow-hidden">
         <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2 uppercase tracking-widest text-xs">
           <TrendingDown size={18} className="text-red-500" />
@@ -230,7 +232,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         </div>
       </div>
 
-      {/* 3. Günlük Dağılım Tablosu (Etkileşimli) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -269,7 +270,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         </div>
       </div>
 
-      {/* 4. Tarih Sorgu */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -301,7 +301,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         </div>
       </div>
 
-      {/* 5. Firma Performansı */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
           <Building2 size={18} className="text-emerald-600" />
@@ -329,39 +328,53 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         </div>
       </div>
 
-      {/* 6. Ayarlar */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-brand-gold/20 shadow-sm overflow-hidden h-fit">
-          <button onClick={() => setShowSmsSettings(!showSmsSettings)} className="w-full p-4 bg-brand-gold/5 dark:bg-brand-gold/10 hover:bg-brand-gold/10 flex justify-between items-center transition-colors">
+          <div className="p-4 bg-brand-gold/5 dark:bg-brand-gold/10 flex justify-between items-center">
             <div className="flex items-center gap-2 font-bold text-brand-navy dark:text-brand-gold uppercase text-[10px] tracking-wider"><MessageSquare size={16} /> SMS Entegrasyonu</div>
-            <span className="text-[10px] text-brand-gold font-black">{showSmsSettings ? 'Kapat' : 'Yapılandır'}</span>
-          </button>
+            <button onClick={() => setShowSmsSettings(!showSmsSettings)} className="text-[10px] text-brand-gold font-black uppercase underline">{showSmsSettings ? 'Gizle' : 'Yapılandır'}</button>
+          </div>
           {showSmsSettings && (
             <div className="p-5 space-y-4 animate-in slide-in-from-top duration-300">
                <div className="grid grid-cols-1 gap-3">
-                  <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API KEY" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-                  <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API HASH" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
-                  <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Hedef Numara" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Key</label>
+                    <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="Örn: 507XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Hash (Şifre)</label>
+                    <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API Şifresi" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Bildirim Gidecek Numara</label>
+                    <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Örn: 0532XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Gönderen Başlığı (Header)</label>
+                    <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="Onaylı Başlığınız" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                  </div>
                </div>
-               <div className="flex items-center gap-2">
-                 <input type="checkbox" checked={tempSms.autoSend} onChange={e => setTempSms(prev => ({...prev, autoSend: e.target.checked}))} />
-                 <span className="text-[10px] font-black uppercase text-slate-400">Otomatik SMS Aktif</span>
+               <div className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                 <input type="checkbox" id="auto-sms" checked={tempSms.autoSend} onChange={e => setTempSms(prev => ({...prev, autoSend: e.target.checked}))} className="w-4 h-4 rounded text-brand-gold focus:ring-brand-gold" />
+                 <label htmlFor="auto-sms" className="text-[10px] font-black uppercase text-slate-500 cursor-pointer">Otomatik SMS (Bulut Asistan) Aktif</label>
                </div>
                <div className="flex flex-col gap-2">
-                 <button onClick={() => onSmsConfigChange(tempSms)} className="w-full bg-brand-gold text-brand-navy font-black py-2 rounded-xl text-[10px] tracking-widest uppercase">AYARLARI KAYDET</button>
-                 <button disabled={isTestingSms} onClick={handleManualSmsTest} className="w-full bg-indigo-600 text-white font-black py-2 rounded-xl text-[10px] tracking-widest uppercase disabled:opacity-50">
-                   {isTestingSms ? <Loader2 size={12} className="animate-spin mx-auto" /> : "TEST SMS GÖNDER"}
+                 <button onClick={() => onSmsConfigChange(tempSms)} className="w-full bg-brand-gold text-brand-navy font-black py-3 rounded-xl text-xs tracking-widest uppercase shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all">AYARLARI KAYDET</button>
+                 <button disabled={isTestingSms} onClick={handleManualSmsTest} className="w-full bg-brand-navy dark:bg-brand-navy/50 text-white font-black py-3 rounded-xl text-[10px] tracking-widest uppercase disabled:opacity-50 flex items-center justify-center gap-2">
+                   {isTestingSms ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                   {isTestingSms ? "GÖNDERİLİYOR..." : "MANUEL TEST SMS GÖNDER"}
                  </button>
                </div>
+               <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic">* Otomatik SMS modu aktifse, sistem her sabah 09:00'da bugünün işlerini, akşam 21:00'de yarının işlerini SMS olarak raporlar kanka.</p>
             </div>
           )}
         </div>
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-fit">
-          <button onClick={() => setShowDbSettings(!showDbSettings)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center transition-colors">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
             <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider"><Database size={16} className="text-indigo-600" />Bulut Veritabanı</div>
-            <span className="text-[10px] text-indigo-600 font-bold">{showDbSettings ? 'Kapat' : 'Yapılandır'}</span>
-          </button>
+            <button onClick={() => setShowDbSettings(!showDbSettings)} className="text-[10px] text-indigo-600 font-black uppercase underline">{showDbSettings ? 'Gizle' : 'Yapılandır'}</button>
+          </div>
           {showDbSettings && (
             <div className="p-5 space-y-4 animate-in slide-in-from-top duration-300">
                <input type="text" value={tempUrl} onChange={e => setTempUrl(e.target.value)} placeholder="Supabase URL" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
@@ -375,7 +388,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
         </div>
       </div>
 
-      {/* DETAY MODALLARI (GÜNLÜK VE DÜZENLEME) */}
+      {/* DETAY MODALLARI */}
       {selectedDayData && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-brand-gold/30">
@@ -391,7 +404,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50 dark:bg-slate-950/50">
-               {/* İşler Listesi */}
                <section>
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-2"><ArrowRightLeft size={14} /> GÜNÜN İŞLERİ ({filteredDayData.jobs.length})</h4>
                   <div className="space-y-3">
@@ -419,7 +431,6 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                   </div>
                </section>
 
-               {/* Giderler Listesi */}
                <section>
                   <h4 className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-2"><Fuel size={14} /> GÜNÜN GİDERLERİ ({filteredDayData.expenses.length})</h4>
                   <div className="space-y-3">

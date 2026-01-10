@@ -86,6 +86,57 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
+  // --- OTOMATİK SMS SİSTEMİ (BULUT ASİSTAN) ---
+  useEffect(() => {
+    if (!smsConfig.autoSend) return;
+
+    const checkAndSendSms = async () => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const hour = now.getHours();
+      
+      // Günde 2 kez kontrol: Sabah 09:00 (Bugünün işleri) ve Akşam 21:00 (Yarının işleri)
+      let slot: 'morning' | 'evening' | null = null;
+      if (hour >= 8 && hour <= 10) slot = 'morning';
+      if (hour >= 20 && hour <= 22) slot = 'evening';
+
+      if (!slot) return;
+
+      // Bu slot için zaten gönderim yapılmış mı kontrol et
+      const alreadySent = smsLogs.some(log => log.date === todayStr && log.slot === slot);
+      if (alreadySent) return;
+
+      const targetDate = slot === 'morning' ? todayStr : new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      const jobsToNotify = scheduledJobs.filter(j => j.date === targetDate);
+
+      if (jobsToNotify.length === 0) return;
+
+      const msgText = `BK Hatırlatma (${targetDate}):\n` + jobsToNotify.map(j => `${j.time}: ${j.passengerName}`).join('\n');
+      
+      try {
+        const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
+        const query = `?username=${encodeURIComponent(smsConfig.username)}&password=${encodeURIComponent(smsConfig.password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(smsConfig.targetNumber)}&recipients=${encodeURIComponent(smsConfig.targetNumber)}&sender=${encodeURIComponent(smsConfig.header)}`;
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(baseUrl + query)}`;
+        
+        const response = await fetch(proxyUrl);
+        const xmlText = await response.text();
+        
+        if (xmlText.includes('<code>200</code>')) {
+          const newLog: SmsLog = { jobId: 'AUTO_SUMMARY', date: todayStr, slot: slot as any };
+          setSmsLogs(prev => [...prev, newLog]);
+          console.log(`Otomatik SMS Başarıyla Gönderildi: ${slot}`);
+        }
+      } catch (err) {
+        console.error("Otomatik SMS Hatası:", err);
+      }
+    };
+
+    const interval = setInterval(checkAndSendSms, 1000 * 60 * 30); // 30 dakikada bir kontrol
+    checkAndSendSms(); // İlk açılışta da bir bak
+
+    return () => clearInterval(interval);
+  }, [smsConfig, scheduledJobs, smsLogs]);
+
   const uniqueCompanies = useMemo(() => {
     const companies = new Set<string>();
     jobs.forEach(j => companies.add(j.company));
@@ -222,7 +273,6 @@ const App: React.FC = () => {
     setModalConfig({
       isOpen: true, title: 'Varış Onayla', message: `${job.passengerName} isimli yolcunun yolculuğunun tamamlandığını onaylıyor musunuz? (İş ${job.date} tarihine kaydedilecektir)`, confirmText: 'Onayla', type: 'success',
       onConfirm: () => {
-        // Kanka, burası önemli. Orijinal işin tarih ve saatini kullanıyoruz.
         const originalDateTime = new Date(`${job.date}T${job.time}:00`);
         const newDailyJob: Job = { 
           id: job.id + '_confirmed', 
