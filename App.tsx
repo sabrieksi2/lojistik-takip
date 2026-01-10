@@ -54,6 +54,12 @@ const getTimeRemaining = (date: string, time: string) => {
   return `${minutes}dk`;
 };
 
+// Karakter temizleme (İleti Merkezi için)
+const cleanTextForSms = (text: string) => {
+  const map: any = { 'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U' };
+  return text.replace(/[çÇğĞıİöÖşŞüÜ]/g, (m) => map[m]);
+};
+
 const App: React.FC = () => {
   const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports'>('daily');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
@@ -86,7 +92,7 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
-  // --- OTOMATİK SMS SİSTEMİ ---
+  // --- OTOMATİK SMS SİSTEMİ (BULUT ASİSTAN) ---
   useEffect(() => {
     if (!smsConfig.autoSend) return;
 
@@ -109,45 +115,44 @@ const App: React.FC = () => {
 
       if (jobsToNotify.length === 0) return;
 
-      const msgText = `BK Hatirlatma (${targetDate}):\n` + jobsToNotify.map(j => `${j.time}: ${j.passengerName}`).join('\n');
-      
-      const sendViaProxy = async (proxyType: 'allorigins' | 'corsproxy') => {
+      const msgRaw = `BK Hatirlatma (${targetDate}):\n` + jobsToNotify.map(j => `${j.time}: ${j.passengerName}`).join('\n');
+      const msgText = cleanTextForSms(msgRaw);
+
+      const fetchSmsWithRetry = async () => {
         const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
         const query = `?username=${encodeURIComponent(smsConfig.username.trim())}&password=${encodeURIComponent(smsConfig.password.trim())}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(smsConfig.targetNumber.replace(/\s/g, ''))}&sender=${encodeURIComponent(smsConfig.header.trim())}`;
-        
-        let url = '';
-        if (proxyType === 'allorigins') {
-          url = `https://api.allorigins.win/get?url=${encodeURIComponent(baseUrl + query)}`;
-        } else {
-          url = `https://corsproxy.io/?${encodeURIComponent(baseUrl + query)}`;
-        }
+        const fullUrl = baseUrl + query;
 
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Proxy ${proxyType} hata verdi: ${response.status}`);
-        
-        if (proxyType === 'allorigins') {
-          const json = await response.json();
-          return json.contents; // allorigins /get endpointi içeriği 'contents' içinde döner
-        } else {
-          return await response.text();
+        const proxies = [
+          (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+          (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+          (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`
+        ];
+
+        for (const proxyFn of proxies) {
+          try {
+            const response = await fetch(proxyFn(fullUrl));
+            if (response.ok) {
+              const text = await response.text();
+              if (text.includes('<code>200</code>')) return true;
+              console.warn("API cevabı olumsuz:", text);
+            }
+          } catch (err) {
+            console.warn("Proxy denemesi başarısız, bir sonrakine geçiliyor...");
+          }
         }
+        return false;
       };
 
       try {
-        // Yedekli deneme
-        let result = '';
-        try {
-          result = await sendViaProxy('allorigins');
-        } catch (e) {
-          result = await sendViaProxy('corsproxy');
-        }
-
-        if (result.includes('<code>200</code>')) {
+        const isSuccess = await fetchSmsWithRetry();
+        if (isSuccess) {
           const newLog: SmsLog = { jobId: 'AUTO_SUMMARY', date: todayStr, slot: slot as any };
           setSmsLogs(prev => [...prev, newLog]);
+          console.log(`Otomatik SMS Gönderildi: ${slot}`);
         }
       } catch (err) {
-        console.error("Otomatik SMS gönderimi tüm proxy denemelerine rağmen başarısız oldu.");
+        console.error("Otomatik SMS Tüm denemeler bitti, başarısız.");
       }
     };
 

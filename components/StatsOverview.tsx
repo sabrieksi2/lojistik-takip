@@ -20,6 +20,11 @@ interface StatsOverviewProps {
   onUpdateExpense: (expense: Expense) => void;
 }
 
+const cleanSmsText = (text: string) => {
+  const map: any = { 'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U' };
+  return text.replace(/[çÇğĞıİöÖşŞüÜ]/g, (m) => map[m]);
+};
+
 const StatsOverview: React.FC<StatsOverviewProps> = ({ 
   jobs, expenses, scheduledJobs, dbConfig, smsConfig, 
   onDbConfigChange, onSmsConfigChange, onSyncRequest,
@@ -29,9 +34,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showDbSettings, setShowDbSettings] = useState(false);
   const [showSmsSettings, setShowSmsSettings] = useState(false);
-  const [showAutomationGuide, setShowAutomationGuide] = useState(false);
   const [isTestingSms, setIsTestingSms] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   
   const [selectedDayData, setSelectedDayData] = useState<{ date: string; displayDate: string } | null>(null);
   const [editingItem, setEditingItem] = useState<{ type: 'job' | 'expense'; data: any } | null>(null);
@@ -40,76 +43,66 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [tempKey, setTempKey] = useState(dbConfig.key);
   const [tempSms, setTempSms] = useState<SmsConfig>(smsConfig);
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
   const handleManualSmsTest = async () => {
     const username = tempSms.username.trim();
     const password = tempSms.password.trim();
     const targetNumber = tempSms.targetNumber.trim().replace(/\s/g, '').replace('+', '');
-    const senderHeader = (tempSms.header || 'ILETI MRKZ').trim();
+    const senderHeader = (tempSms.header || 'APITEST').trim();
 
     if (!username || !password || !targetNumber) {
-      alert("Kanka API bilgilerini eksiksiz girmelisin!");
+      alert("Kanka API bilgilerini (No, Şifre, Alıcı No) eksiksiz girmelisin!");
       return;
     }
 
     setIsTestingSms(true);
     
-    // Yardımcı: Proxy üzerinden çekim yapar
-    const fetchWithProxy = async (proxyType: 'allorigins' | 'corsproxy') => {
-      const msgText = "BK Lojistik Sistem Testi: Baglanti basarili kanka!";
-      const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-      const queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
-      const fullSmsUrl = baseUrl + '?' + queryParams;
+    const msgRaw = "BK Lojistik: Sistem baglantisi basarili kanka! Bol kazanclar.";
+    const msgText = cleanSmsText(msgRaw);
+    const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
+    const queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
+    const fullSmsUrl = baseUrl + '?' + queryParams;
 
-      let finalProxyUrl = '';
-      if (proxyType === 'allorigins') {
-        // allorigins /get endpointi JSON döner ve CORS engeline daha dayanıklıdır
-        finalProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(fullSmsUrl)}`;
-      } else {
-        finalProxyUrl = `https://corsproxy.io/?${encodeURIComponent(fullSmsUrl)}`;
-      }
+    // Proxy listesi (En güçlüden zayıfa)
+    const proxies = [
+      { name: 'AllOrigins', url: (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}` },
+      { name: 'CodeTabs', url: (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}` },
+      { name: 'ThingProxy', url: (u: string) => `https://thingproxy.freeboard.io/fetch/${u}` }
+    ];
 
-      const response = await fetch(finalProxyUrl);
-      if (!response.ok) throw new Error(`${proxyType} Proxy Hatası: ${response.status}`);
-      
-      if (proxyType === 'allorigins') {
-        const json = await response.json();
-        return json.contents;
-      }
-      return await response.text();
-    };
+    let lastError = '';
+    let foundSuccess = false;
 
-    try {
-      let xmlResponse = '';
-      
-      // Önce AllOrigins deniyoruz
+    for (const proxy of proxies) {
       try {
-        console.log("SMS Denemesi 1: AllOrigins...");
-        xmlResponse = await fetchWithProxy('allorigins');
-      } catch (e1: any) {
-        console.warn("AllOrigins başarısız, CorsProxy deneniyor...", e1.message);
-        // O da olmazsa CorsProxy deniyoruz
-        xmlResponse = await fetchWithProxy('corsproxy');
+        console.log(`SMS Denemesi: ${proxy.name}...`);
+        const response = await fetch(proxy.url(fullSmsUrl));
+        
+        if (response.ok) {
+          const xmlResponse = await response.text();
+          if (xmlResponse.includes('<code>200</code>')) {
+            alert(`Süper kanka! SMS başarıyla gönderildi (${proxy.name} üzerinden).`);
+            foundSuccess = true;
+            break;
+          } else {
+            const codeMatch = xmlResponse.match(/<code>(.*?)<\/code>/);
+            const msgMatch = xmlResponse.match(/<message>(.*?)<\/message>/);
+            lastError = `API Cevabı:\nKod: ${codeMatch ? codeMatch[1] : '?'}\nSebep: ${msgMatch ? msgMatch[1] : 'Bilinmiyor'}`;
+            // API hatası döndüyse (şifre yanlış vb.) diğer proxyleri denemeye gerek yok.
+            break; 
+          }
+        } else {
+          lastError = `${proxy.name} Proxy Hatası (${response.status})`;
+        }
+      } catch (err: any) {
+        lastError = `${proxy.name} Bağlantı Hatası: ${err.message}`;
       }
-
-      if (xmlResponse.includes('<code>200</code>')) {
-        alert("Süper! Test SMS başarıyla gönderildi.");
-      } else {
-        const codeMatch = xmlResponse.match(/<code>(.*?)<\/code>/);
-        const msgMatch = xmlResponse.match(/<message>(.*?)<\/message>/);
-        alert(`SMS API Hatası:\nKod: ${codeMatch ? codeMatch[1] : 'Bilinmiyor'}\nMesaj: ${msgMatch ? msgMatch[1] : 'Yanıt ayrıştırılamadı'}\n\nİpucu: API Key veya Şifre hatalı olabilir kanka.`);
-      }
-    } catch (err: any) {
-      console.error("SMS Gönderim Hatası:", err);
-      alert(`Maalesef bağlantı kurulamadı kanka. Proxy servisleri şu an yoğun veya kapalı olabilir.\n\nDetay: ${err.message}`);
-    } finally {
-      setIsTestingSms(false);
     }
+
+    if (!foundSuccess) {
+      alert(`Maalesef SMS gitmedi kanka.\n\nSon Hata:\n${lastError}\n\nİpucu: Eğer '401' veya '402' kodunu görüyorsan İleti Merkezi şifren veya bakiyen sorunludur. 'Sender' başlığına APITEST yazıp tekrar dene.`);
+    }
+
+    setIsTestingSms(false);
   };
 
   const getExpenseByType = (expenseList: Expense[]) => {
@@ -355,20 +348,20 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
             <div className="p-5 space-y-4 animate-in slide-in-from-top duration-300">
                <div className="grid grid-cols-1 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Key</label>
-                    <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="API Key" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi Kullanıcı Adı (No)</label>
+                    <input type="text" value={tempSms.username} onChange={e => setTempSms(prev => ({...prev, username: e.target.value}))} placeholder="Örn: 532XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi API Hash (Şifre)</label>
-                    <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="API Hash" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">İleti Merkezi Şifre</label>
+                    <input type="password" value={tempSms.password} onChange={e => setTempSms(prev => ({...prev, password: e.target.value}))} placeholder="Panel Şifresi" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Bildirim Gidecek Numara</label>
                     <input type="text" value={tempSms.targetNumber} onChange={e => setTempSms(prev => ({...prev, targetNumber: e.target.value}))} placeholder="Örn: 532XXXXXXX" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Gönderen Başlığı (Header)</label>
-                    <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="Başlık" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Gönderen Başlığı (Originator)</label>
+                    <input type="text" value={tempSms.header} onChange={e => setTempSms(prev => ({...prev, header: e.target.value}))} placeholder="Örn: APITEST veya BKLOJ" className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none text-slate-800 dark:text-slate-200" />
                   </div>
                </div>
                <div className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
