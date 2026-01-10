@@ -46,6 +46,6 @@ export interface SmsConfig {
 
 export interface SmsLog {
   jobId: string;
-  slot: 'morning' | 'afternoon' | 'evening';
+  slot: 'morning' | 'afternoon' | 'evening' | 'test';
   date: string; // YYYY-MM-DD
 }

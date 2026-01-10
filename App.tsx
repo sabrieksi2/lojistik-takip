@@ -54,7 +54,6 @@ const getTimeRemaining = (date: string, time: string) => {
   return `${minutes}dk`;
 };
 
-// Karakter temizleme (İleti Merkezi için)
 const cleanTextForSms = (text: string) => {
   const map: any = { 'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U' };
   return text.replace(/[çÇğĞıİöÖşŞüÜ]/g, (m) => map[m]);
@@ -100,24 +99,35 @@ const App: React.FC = () => {
       const todayStr = new Date().toISOString().split('T')[0];
       const now = new Date();
       const hour = now.getHours();
+      const minute = now.getMinutes();
       
-      let slot: 'morning' | 'evening' | null = null;
+      let slot: 'morning' | 'evening' | 'test' | null = null;
+      
+      // Standart saatler
       if (hour >= 8 && hour <= 10) slot = 'morning';
       if (hour >= 20 && hour <= 22) slot = 'evening';
+      
+      // KANKA: SENIN ICIN EKLEDIGIM TEST SAATI (16:20 - 16:30 arası)
+      if (hour === 16 && minute >= 20 && minute <= 30) slot = 'test';
 
       if (!slot) return;
 
-      const alreadySent = smsLogs.some(log => log.date === todayStr && (log.slot === slot || (log.slot as string) === slot));
+      // Bu slot için bugün zaten gönderildi mi kontrol et
+      const alreadySent = smsLogs.some(log => log.date === todayStr && log.slot === slot);
       if (alreadySent) return;
 
-      const targetDate = slot === 'morning' ? todayStr : new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      // Mesaj içeriğini hazırla
+      const targetDate = (slot === 'evening') 
+        ? new Date(Date.now() + 86400000).toISOString().split('T')[0] 
+        : todayStr;
+      
       const jobsToNotify = scheduledJobs.filter(j => j.date === targetDate);
-
       if (jobsToNotify.length === 0) return;
 
       const msgRaw = `BK Hatirlatma (${targetDate}):\n` + jobsToNotify.map(j => `${j.time}: ${j.passengerName}`).join('\n');
       const msgText = cleanTextForSms(msgRaw);
 
+      // SMS Gönderme Fonksiyonu (Yedekli Proxy)
       const fetchSmsWithRetry = async () => {
         const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
         const query = `?username=${encodeURIComponent(smsConfig.username.trim())}&password=${encodeURIComponent(smsConfig.password.trim())}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(smsConfig.targetNumber.replace(/\s/g, ''))}&sender=${encodeURIComponent(smsConfig.header.trim())}`;
@@ -135,10 +145,10 @@ const App: React.FC = () => {
             if (response.ok) {
               const text = await response.text();
               if (text.includes('<code>200</code>')) return true;
-              console.warn("API cevabı olumsuz:", text);
+              console.warn("Otomasyon: API cevabı olumsuz veya bakiye yok.");
             }
           } catch (err) {
-            console.warn("Proxy denemesi başarısız, bir sonrakine geçiliyor...");
+            console.warn("Otomasyon: Proxy denemesi pas geçildi.");
           }
         }
         return false;
@@ -147,16 +157,22 @@ const App: React.FC = () => {
       try {
         const isSuccess = await fetchSmsWithRetry();
         if (isSuccess) {
-          const newLog: SmsLog = { jobId: 'AUTO_SUMMARY', date: todayStr, slot: slot as any };
-          setSmsLogs(prev => [...prev, newLog]);
-          console.log(`Otomatik SMS Gönderildi: ${slot}`);
+          const newLog: SmsLog = { jobId: 'AUTO_SUMMARY', date: todayStr, slot: slot };
+          setSmsLogs(prev => {
+            const next = [...prev, newLog];
+            // Logu kaydetmek için triggerSync'i burada manuel çağıralım
+            triggerSync(undefined, undefined, undefined, undefined, undefined, next);
+            return next;
+          });
+          console.log(`[BULUT ASİSTAN] Başarıyla SMS gönderildi. Slot: ${slot}`);
         }
       } catch (err) {
-        console.error("Otomatik SMS Tüm denemeler bitti, başarısız.");
+        console.error("Otomasyon hatası:", err);
       }
     };
 
-    const interval = setInterval(checkAndSendSms, 1000 * 60 * 60);
+    // Kontrol aralığını 1 dakikaya düşürdüm ki test saatini kaçırmasın
+    const interval = setInterval(checkAndSendSms, 60000); 
     checkAndSendSms();
 
     return () => clearInterval(interval);
@@ -255,7 +271,8 @@ const App: React.FC = () => {
     updatedScheduled?: ScheduledJob[], 
     updatedFinished?: ScheduledJob[], 
     updatedExpenses?: Expense[],
-    updatedSmsConfig?: SmsConfig
+    updatedSmsConfig?: SmsConfig,
+    updatedSmsLogs?: SmsLog[]
   ) => {
     pushToCloud({
       jobs: updatedJobs || jobs,
@@ -263,7 +280,7 @@ const App: React.FC = () => {
       finishedJobs: updatedFinished || finishedJobs,
       expenses: updatedExpenses || expenses,
       smsConfig: updatedSmsConfig || smsConfig,
-      smsLogs: smsLogs
+      smsLogs: updatedSmsLogs || smsLogs
     });
   };
 
