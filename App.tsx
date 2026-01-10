@@ -86,7 +86,7 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
-  // --- OTOMATİK SMS SİSTEMİ (BULUT ASİSTAN) ---
+  // --- OTOMATİK SMS SİSTEMİ ---
   useEffect(() => {
     if (!smsConfig.autoSend) return;
 
@@ -111,27 +111,47 @@ const App: React.FC = () => {
 
       const msgText = `BK Hatirlatma (${targetDate}):\n` + jobsToNotify.map(j => `${j.time}: ${j.passengerName}`).join('\n');
       
-      try {
+      const sendViaProxy = async (proxyType: 'allorigins' | 'corsproxy') => {
         const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
-        const query = `?username=${encodeURIComponent(smsConfig.username.trim())}&password=${encodeURIComponent(smsConfig.password.trim())}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(smsConfig.targetNumber.replace(/\s/g, ''))}&recipients=${encodeURIComponent(smsConfig.targetNumber.replace(/\s/g, ''))}&sender=${encodeURIComponent(smsConfig.header.trim())}`;
+        const query = `?username=${encodeURIComponent(smsConfig.username.trim())}&password=${encodeURIComponent(smsConfig.password.trim())}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(smsConfig.targetNumber.replace(/\s/g, ''))}&sender=${encodeURIComponent(smsConfig.header.trim())}`;
         
-        // corsproxy.io kullanımı: Daha stabil ve hızlı
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl + query)}`;
+        let url = '';
+        if (proxyType === 'allorigins') {
+          url = `https://api.allorigins.win/get?url=${encodeURIComponent(baseUrl + query)}`;
+        } else {
+          url = `https://corsproxy.io/?${encodeURIComponent(baseUrl + query)}`;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Proxy ${proxyType} hata verdi: ${response.status}`);
         
-        const response = await fetch(proxyUrl);
-        const xmlText = await response.text();
-        
-        if (xmlText.includes('<code>200</code>')) {
+        if (proxyType === 'allorigins') {
+          const json = await response.json();
+          return json.contents; // allorigins /get endpointi içeriği 'contents' içinde döner
+        } else {
+          return await response.text();
+        }
+      };
+
+      try {
+        // Yedekli deneme
+        let result = '';
+        try {
+          result = await sendViaProxy('allorigins');
+        } catch (e) {
+          result = await sendViaProxy('corsproxy');
+        }
+
+        if (result.includes('<code>200</code>')) {
           const newLog: SmsLog = { jobId: 'AUTO_SUMMARY', date: todayStr, slot: slot as any };
           setSmsLogs(prev => [...prev, newLog]);
-          console.log(`Otomatik SMS Başarıyla Gönderildi: ${slot}`);
         }
       } catch (err) {
-        console.error("Otomatik SMS Hatası:", err);
+        console.error("Otomatik SMS gönderimi tüm proxy denemelerine rağmen başarısız oldu.");
       }
     };
 
-    const interval = setInterval(checkAndSendSms, 1000 * 60 * 30);
+    const interval = setInterval(checkAndSendSms, 1000 * 60 * 60);
     checkAndSendSms();
 
     return () => clearInterval(interval);
@@ -181,7 +201,6 @@ const App: React.FC = () => {
       }
     } catch (e) { 
       setIsCloudActive(false); 
-      console.warn("Bulut verisi çekilemedi, yerel modda devam ediliyor.");
     } finally { 
       setIsSyncing(false); 
     }

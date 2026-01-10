@@ -58,30 +58,55 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     }
 
     setIsTestingSms(true);
-    try {
+    
+    // Yardımcı: Proxy üzerinden çekim yapar
+    const fetchWithProxy = async (proxyType: 'allorigins' | 'corsproxy') => {
       const msgText = "BK Lojistik Sistem Testi: Baglanti basarili kanka!";
-      
       const baseUrl = 'https://api.iletimerkezi.com/v1/send-sms/get/';
       const queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&text=${encodeURIComponent(msgText)}&receipents=${encodeURIComponent(targetNumber)}&sender=${encodeURIComponent(senderHeader)}`;
-      
-      // ÇÖZÜM: corsproxy.io kullanarak tarayıcı engelini aşıyoruz
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl + '?' + queryParams)}`;
+      const fullSmsUrl = baseUrl + '?' + queryParams;
 
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error(`Bağlantı başarısız (Status: ${response.status})`);
+      let finalProxyUrl = '';
+      if (proxyType === 'allorigins') {
+        // allorigins /get endpointi JSON döner ve CORS engeline daha dayanıklıdır
+        finalProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(fullSmsUrl)}`;
+      } else {
+        finalProxyUrl = `https://corsproxy.io/?${encodeURIComponent(fullSmsUrl)}`;
+      }
 
-      const xmlText = await response.text();
+      const response = await fetch(finalProxyUrl);
+      if (!response.ok) throw new Error(`${proxyType} Proxy Hatası: ${response.status}`);
       
-      if (xmlText.includes('<code>200</code>')) {
+      if (proxyType === 'allorigins') {
+        const json = await response.json();
+        return json.contents;
+      }
+      return await response.text();
+    };
+
+    try {
+      let xmlResponse = '';
+      
+      // Önce AllOrigins deniyoruz
+      try {
+        console.log("SMS Denemesi 1: AllOrigins...");
+        xmlResponse = await fetchWithProxy('allorigins');
+      } catch (e1: any) {
+        console.warn("AllOrigins başarısız, CorsProxy deneniyor...", e1.message);
+        // O da olmazsa CorsProxy deniyoruz
+        xmlResponse = await fetchWithProxy('corsproxy');
+      }
+
+      if (xmlResponse.includes('<code>200</code>')) {
         alert("Süper! Test SMS başarıyla gönderildi.");
       } else {
-        const codeMatch = xmlText.match(/<code>(.*?)<\/code>/);
-        const msgMatch = xmlText.match(/<message>(.*?)<\/message>/);
-        alert(`SMS Hatası:\nKod: ${codeMatch ? codeMatch[1] : 'Bilinmiyor'}\nMesaj: ${msgMatch ? msgMatch[1] : 'Hata ayrıştırılamadı'}`);
+        const codeMatch = xmlResponse.match(/<code>(.*?)<\/code>/);
+        const msgMatch = xmlResponse.match(/<message>(.*?)<\/message>/);
+        alert(`SMS API Hatası:\nKod: ${codeMatch ? codeMatch[1] : 'Bilinmiyor'}\nMesaj: ${msgMatch ? msgMatch[1] : 'Yanıt ayrıştırılamadı'}\n\nİpucu: API Key veya Şifre hatalı olabilir kanka.`);
       }
     } catch (err: any) {
-      console.error("SMS Fetch Hatası:", err);
-      alert(`Bağlantı koptu kanka. İnternetini kontrol et veya Proxy servisi o anlık kapalı olabilir.\n\nDetay: ${err.message}`);
+      console.error("SMS Gönderim Hatası:", err);
+      alert(`Maalesef bağlantı kurulamadı kanka. Proxy servisleri şu an yoğun veya kapalı olabilir.\n\nDetay: ${err.message}`);
     } finally {
       setIsTestingSms(false);
     }
