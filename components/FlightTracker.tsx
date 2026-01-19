@@ -1,14 +1,47 @@
 
-import React, { useState } from 'react';
-import { Search, Plane, MapPin, Clock, Calendar, Info, Loader2, PlaneTakeoff, PlaneLanding, Radar, ExternalLink, AlertTriangle, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Plane, MapPin, Clock, Calendar, Info, Loader2, PlaneTakeoff, PlaneLanding, Radar, ExternalLink, AlertTriangle, ShieldCheck, Key } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { FlightInfo } from '../types';
+
+// Defining AIStudio interface to match expected type and resolve global declaration conflict
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    aistudio: AIStudio;
+  }
+}
 
 const FlightTracker: React.FC = () => {
   const [flightNo, setFlightNo] = useState('');
   const [loading, setLoading] = useState(false);
   const [flightData, setFlightData] = useState<FlightInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasKey, setHasKey] = useState<boolean>(true);
+
+  // Sayfa açıldığında anahtar kontrolü yap
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio) {
+        const keyExists = await window.aistudio.hasSelectedApiKey();
+        setHasKey(keyExists);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      // Assume success after opening dialog as per guidelines
+      setHasKey(true);
+      setError(null);
+    }
+  };
 
   const trackFlight = async () => {
     if (!flightNo) return;
@@ -16,13 +49,15 @@ const FlightTracker: React.FC = () => {
     setError(null);
 
     try {
+      // Create new instance right before call as per guidelines to use the most up-to-date API key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
       const prompt = `Lütfen şu uçuş numarasına ait CANLI uçuş bilgilerini getir: ${flightNo}. 
       Hangi şehirden kalkıyor, nereye iniyor, planlanan iniş saati, gerçek/beklenen iniş saati, rötar süresi, kapı numarası ve şu anki durumu (havada, indi, rötar vb.) hakkında net bilgi ver. 
       Lütfen BK Lojistik VIP Transfer operasyonu için kullanılacağını unutma, bilgiler çok net olmalı.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -32,31 +67,59 @@ const FlightTracker: React.FC = () => {
       const text = response.text || "Bilgi alınamadı.";
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       
-      // Basit bir parser simülasyonu (Text'ten bilgi ayıklama)
-      // Normalde daha gelişmiş bir parsing gerekir ama burada UI için metni de gösteriyoruz
       setFlightData({
         flightNumber: flightNo.toUpperCase(),
-        status: text.includes("indi") || text.includes("landed") ? "TAMAMLANDI" : text.includes("rötarlı") || text.includes("delay") ? "RÖTARLI" : "HAVADA / ZAMANINDA",
+        status: text.toLowerCase().includes("indi") || text.toLowerCase().includes("landed") ? "TAMAMLANDI" : text.toLowerCase().includes("rötarlı") || text.toLowerCase().includes("delay") ? "RÖTARLI" : "HAVADA / ZAMANINDA",
         departure: "Detaylar Aşağıda",
         arrival: "Detaylar Aşağıda",
         scheduledArrival: "-",
         actualArrival: "-",
-        delay: text.includes("dakika") ? "Var" : "Yok",
+        delay: text.toLowerCase().includes("dakika") || text.toLowerCase().includes("minute") ? "Var" : "Yok",
         gate: "-",
         lastUpdated: new Date().toLocaleTimeString('tr-TR'),
         sources: chunks
       });
       
-      // Asıl ham metni detay olarak bir state'e alabiliriz
       (window as any).flightDetailsText = text;
 
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Uçuş bilgileri çekilirken bir hata oluştu kanka. Lütfen tekrar dene.");
+      if (err.message?.includes("Requested entity was not found") || err.message?.includes("API Key")) {
+        setHasKey(false);
+        setError("Uçuş servisi için API Anahtarı seçmen gerekiyor kanka.");
+      } else {
+        setError("Uçuş bilgileri çekilirken bir hata oluştu kanka. Lütfen tekrar dene.");
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  if (!hasKey) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 bg-white dark:bg-slate-900 rounded-[3rem] border-4 border-dashed border-brand-gold/30 text-center space-y-8 animate-in zoom-in-95">
+        <div className="p-8 bg-brand-gold/10 text-brand-gold rounded-full animate-bounce">
+          <Key size={64} />
+        </div>
+        <div className="max-w-md">
+          <h3 className="text-2xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-widest mb-4">API ANAHTARI GEREKLİ</h3>
+          <p className="text-xs text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+            Uçuş verilerini canlı çekebilmek için bir API anahtarı seçmen gerekiyor. Bu işlem ücretsizdir (veya kullandığın kadar ödersin).
+          </p>
+          <p className="text-[10px] text-slate-400 mt-2 italic">
+            Lütfen "Google Cloud Project" içinden bir anahtar seçtiğinden emin ol kanka.
+          </p>
+        </div>
+        <button 
+          onClick={handleSelectKey}
+          className="px-10 py-5 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black rounded-2xl uppercase tracking-[0.2em] shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center gap-3"
+        >
+          <Key size={20} /> ANAHTAR SEÇ VE BAĞLAN
+        </button>
+        <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-[10px] text-indigo-500 font-bold underline">Fatura/Billing Dokümantasyonu</a>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -80,7 +143,7 @@ const FlightTracker: React.FC = () => {
               type="text" 
               value={flightNo} 
               onChange={(e) => setFlightNo(e.target.value)}
-              placeholder="Örn: TK1874 veya THY123"
+              placeholder="Örn: TK1752 veya THY123"
               className="w-full pl-6 pr-20 py-5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-[1.5rem] text-lg font-black uppercase tracking-widest focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold outline-none transition-all shadow-inner"
               onKeyDown={(e) => e.key === 'Enter' && trackFlight()}
             />
@@ -96,9 +159,14 @@ const FlightTracker: React.FC = () => {
       </div>
 
       {error && (
-        <div className="p-6 bg-red-50 dark:bg-red-900/10 border-2 border-dashed border-red-200 dark:border-red-900/30 rounded-3xl flex items-center gap-4 text-red-600 font-black animate-in slide-in-from-top-4">
-          <AlertTriangle size={24} />
-          {error}
+        <div className="p-6 bg-red-50 dark:bg-red-900/10 border-2 border-dashed border-red-200 dark:border-red-900/30 rounded-3xl flex flex-col items-center gap-4 text-red-600 font-black animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-3">
+             <AlertTriangle size={24} />
+             {error}
+          </div>
+          {error.includes("API Anahtarı") && (
+            <button onClick={handleSelectKey} className="px-6 py-2 bg-red-600 text-white rounded-xl text-[10px] uppercase">ANAHTARI YENİLE</button>
+          )}
         </div>
       )}
 
@@ -121,7 +189,7 @@ const FlightTracker: React.FC = () => {
                  <div className="text-center">
                     <PlaneTakeoff size={40} className="mx-auto text-slate-300 mb-4" />
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">KALKIŞ</h4>
-                    <div className="text-2xl font-black text-brand-navy dark:text-white uppercase">YÜKLENİYOR...</div>
+                    <div className="text-2xl font-black text-brand-navy dark:text-white uppercase">Havalimanı</div>
                  </div>
 
                  <div className="relative h-px bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -133,13 +201,13 @@ const FlightTracker: React.FC = () => {
                  <div className="text-center">
                     <PlaneLanding size={40} className="mx-auto text-brand-gold mb-4" />
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">VARIŞ</h4>
-                    <div className="text-2xl font-black text-brand-navy dark:text-white uppercase">YÜKLENİYOR...</div>
+                    <div className="text-2xl font-black text-brand-navy dark:text-white uppercase">Havalimanı</div>
                  </div>
               </div>
 
               <div className="mt-12 p-8 bg-slate-50 dark:bg-slate-950 rounded-3xl border border-slate-100 dark:border-slate-800">
                  <h5 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                    <ShieldCheck size={16}/> GEMINI AI ANALİZ RAPORU
+                    <ShieldCheck size={16}/> GEMINI AI CANLI ANALİZ RAPORU
                  </h5>
                  <div className="text-slate-700 dark:text-slate-300 text-sm font-medium leading-relaxed whitespace-pre-wrap italic">
                     {(window as any).flightDetailsText || "Uçuş analizi yapılıyor..."}
@@ -177,17 +245,11 @@ const FlightTracker: React.FC = () => {
                 />
                 <div className="absolute inset-0 pointer-events-none border-4 border-inset border-brand-navy/10"></div>
                 
-                {/* Overlay for interaction info */}
                 <div className="absolute bottom-4 left-4 right-4 bg-white/90 dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl backdrop-blur-md">
                    <p className="text-[10px] font-black text-slate-500 uppercase leading-tight">
-                     FlightRadar24 canlı verisidir kanka. Eğer uçuş koduyla veri gelmezse manuel arama yapabilirsin.
+                     FlightRadar24 canlı verisidir kanka.
                    </p>
                 </div>
-              </div>
-              <div className="p-6 border-t border-slate-100 dark:border-slate-800">
-                 <button className="w-full py-4 bg-brand-gold text-brand-navy font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2">
-                    <Plane size={16} /> HARİTAYI GENİŞLET
-                 </button>
               </div>
             </div>
           </div>
@@ -202,7 +264,7 @@ const FlightTracker: React.FC = () => {
            </div>
            <h3 className="text-2xl font-black text-slate-300 uppercase tracking-widest">TAKİP EDİLECEK UÇUŞ YOK</h3>
            <p className="max-w-md mx-auto text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-relaxed">
-             Yukarıya uçuş numarasını girerek (Örn: TK1874) canlı verileri çekmeye başlayabilirsin kanka. İniş saati ve rötar anlık olarak kontrol edilir.
+             Yukarıya uçuş numarasını girerek (Örn: TK1752) canlı verileri çekmeye başlayabilirsin kanka. İniş saati ve rötar anlık olarak kontrol edilir.
            </p>
         </div>
       )}
