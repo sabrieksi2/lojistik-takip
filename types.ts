@@ -44,5 +44,5 @@ export interface TelegramConfig {
 
 export interface TelegramLog {
   date: string; // YYYY-MM-DD
-  slot: 'morning' | 'noon' | 'evening';
+  slot: string; // 'hour_0' ... 'hour_23' veya eski slotlar
 }

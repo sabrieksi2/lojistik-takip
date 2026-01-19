@@ -94,7 +94,7 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
-  // --- TELEGRAM BOT SAATLİK OTOMASYONU ---
+  // --- TELEGRAM BOT AGRESİF SAATLİK OTOMASYONU ---
   useEffect(() => {
     if (!tgConfig.autoSend || !tgConfig.botToken || !tgConfig.chatId) return;
 
@@ -103,33 +103,31 @@ const App: React.FC = () => {
       const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
       const now = new Date();
       const hour = now.getHours();
-      const min = now.getMinutes();
       
-      // Her saatin ilk 5 dakikası içinde kontrol yap
-      if (min > 5) return;
-
+      // Slot key 'hour_14' gibi benzersiz olacak
       const slotKey = `hour_${hour}`;
       const alreadySent = tgLogs.some(log => log.date === todayStr && log.slot === slotKey);
+      
+      // Eğer bu saat dilimi için henüz mesaj gitmemişse dakikaya bakmadan gönder!
       if (alreadySent) return;
 
-      // Yaklaşan işleri topla (Bugün ve Yarın)
       const todayJobs = scheduledJobs.filter(j => j.date === todayStr);
       const tomorrowJobs = scheduledJobs.filter(j => j.date === tomorrowStr);
       
-      let message = `🚀 *BK LOJİSTİK - SAATLİK RAPOR*\n⏰ Saat: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
+      let message = `🚀 *BK LOJİSTİK - SAATLİK DURUM*\n⏰ Rapor Saati: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
       
       if (todayJobs.length === 0 && tomorrowJobs.length === 0) {
-        message += `_Kanka şu an için bugün veya yarın planlı bir iş görünmüyor. Dinlenmene bak!_ ☕`;
+        message += `_Kanka bugün ve yarın için planlı bir transferin görünmüyor. Her şey yolunda!_ 🍀`;
       } else {
         if (todayJobs.length > 0) {
-          message += `*📅 BUGÜNKÜ İŞLER:*\n`;
+          message += `*📅 BUGÜNKÜ PLANIN:*\n`;
           todayJobs.forEach((j, i) => {
             message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
           });
         }
         
         if (tomorrowJobs.length > 0) {
-          message += `*📅 YARINKİ İŞLER:*\n`;
+          message += `*📅 YARINKİ PLANIN:*\n`;
           tomorrowJobs.forEach((j, i) => {
             message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n`;
           });
@@ -144,22 +142,22 @@ const App: React.FC = () => {
         });
         
         if (response.ok) {
-          const newLog: TelegramLog = { date: todayStr, slot: slotKey as any };
+          const newLog: TelegramLog = { date: todayStr, slot: slotKey };
           setTgLogs(prev => {
-            const next = [...prev, newLog];
-            // Temizlik: 48 saatten eski logları sil (state şişmesin)
-            const filtered = next.slice(-100); 
-            triggerSync(undefined, undefined, undefined, undefined, undefined, filtered);
-            return filtered;
+            const next = [...prev, newLog].slice(-50); // Son 50 logu tutmak yeterli
+            triggerSync(undefined, undefined, undefined, undefined, undefined, next);
+            return next;
           });
         }
       } catch (err) { console.error("Telegram error:", err); }
     };
 
-    const interval = setInterval(checkAndSendTelegram, 60000); 
+    // Her 30 saniyede bir saati kontrol et (dakika bekleme derdi yok)
+    const interval = setInterval(checkAndSendTelegram, 30000); 
     return () => clearInterval(interval);
   }, [tgConfig, scheduledJobs, tgLogs]);
 
+  // Rest of the code remains the same... (puling, pushing, handlers etc.)
   const uniqueCompanies = useMemo(() => {
     const companies = new Set<string>();
     jobs.forEach(j => companies.add(j.company));
@@ -195,7 +193,7 @@ const App: React.FC = () => {
         setFinishedJobs(cloudData.finishedJobs || []);
         setExpenses(cloudData.expenses || []);
         if (cloudData.tgConfig) setTgConfig(cloudData.tgConfig);
-        if (cloudData.tgLogs) setTgLogs(cloudData.tgLogs);
+        if (cloudData.tgLogs) setTgLogs(cloudData.tgLogs || []);
         setLastSync(new Date().toLocaleTimeString('tr-TR'));
         setIsCloudActive(true);
         setSyncFlash(true);
