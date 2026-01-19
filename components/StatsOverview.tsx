@@ -4,7 +4,7 @@ import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig } from '../type
 import { 
   Database, ShieldCheck, Wallet, TrendingUp, TrendingDown, Building2, CalendarDays,
   ChevronDown, ChevronUp, RefreshCw, MessageCircle, CloudLightning, Info, Search, Calendar,
-  Activity, ArrowRightLeft, Copy, Check
+  Activity, ArrowRightLeft, Copy, Check, X, MapPin, CreditCard, ChevronRight
 } from 'lucide-react';
 
 interface StatsOverviewProps {
@@ -30,6 +30,9 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
   const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
   const [copied, setCopied] = useState(false);
+  
+  // Seçilen günün detaylarını tutan state
+  const [selectedDateDetails, setSelectedDateDetails] = useState<string | null>(null);
 
   // --- HESAPLAMA FONKSİYONU ---
   const getStats = (days: number | 'month' | 'total') => {
@@ -91,6 +94,28 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     return Object.entries(data).map(([name, d]) => ({ name, ...d })).sort((a,b) => b.rev - a.rev);
   }, [jobs]);
 
+  // Seçili günün işleri ve TOPLANMIŞ (GRUPLANMIŞ) giderleri
+  const dayDetails = useMemo(() => {
+    if (!selectedDateDetails) return null;
+    const dayJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === selectedDateDetails);
+    const dayExps = expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === selectedDateDetails);
+    
+    // Giderleri tip bazında grupla (Kanka burası senin istediğin yer)
+    const groupedExps: Record<string, number> = {};
+    dayExps.forEach(e => {
+      if (!groupedExps[e.type]) groupedExps[e.type] = 0;
+      groupedExps[e.type] += e.amount;
+    });
+
+    return {
+      dateStr: new Date(selectedDateDetails).toLocaleDateString('tr-TR'),
+      jobs: dayJobs,
+      expenses: Object.entries(groupedExps).map(([type, amount]) => ({ type: type as ExpenseType, amount })),
+      totalRev: dayJobs.reduce((s, j) => s + j.amount, 0),
+      totalExp: dayExps.reduce((s, e) => s + e.amount, 0)
+    };
+  }, [selectedDateDetails, jobs, expenses]);
+
   const cronSql = `-- SQL Editor'e yapıştır kanka
 select cron.schedule(
   'saatlik-lojistik-botu',
@@ -131,6 +156,96 @@ select cron.schedule(
 
   return (
     <div className="space-y-8 pb-20">
+      {/* Detay Modalı (Popup) */}
+      {selectedDateDetails && dayDetails && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+            <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-2xl shadow-lg">
+                  <Calendar size={24} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-tighter">{dayDetails.dateStr} DETAYLI RAPORU</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">O gün yapılan tüm işlemler ve toplanmış giderler.</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedDateDetails(null)} className="p-3 bg-white dark:bg-slate-800 text-slate-400 hover:text-red-500 rounded-2xl border border-slate-100 dark:border-slate-700 transition-colors shadow-sm">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 space-y-10">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 <div className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/20">
+                    <span className="text-[10px] font-black text-emerald-600 uppercase block mb-1">GÜNLÜK GELİR</span>
+                    <span className="text-2xl font-black text-emerald-600">{dayDetails.totalRev.toLocaleString('tr-TR')} ₺</span>
+                 </div>
+                 <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-3xl border border-red-100 dark:border-red-900/20">
+                    <span className="text-[10px] font-black text-red-600 uppercase block mb-1">GÜNLÜK GİDER</span>
+                    <span className="text-2xl font-black text-red-600">{dayDetails.totalExp.toLocaleString('tr-TR')} ₺</span>
+                 </div>
+                 <div className="bg-brand-navy p-6 rounded-3xl border border-brand-navy shadow-xl shadow-brand-navy/20">
+                    <span className="text-[10px] font-black text-brand-gold uppercase block mb-1">GÜNLÜK NET KAR</span>
+                    <span className="text-2xl font-black text-white">{(dayDetails.totalRev - dayDetails.totalExp).toLocaleString('tr-TR')} ₺</span>
+                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                 {/* İş Listesi */}
+                 <div className="space-y-4">
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <ChevronRight size={14} className="text-brand-gold"/> YAPILAN İŞLER ({dayDetails.jobs.length})
+                    </h4>
+                    <div className="space-y-3">
+                       {dayDetails.jobs.map(j => (
+                         <div key={j.id} className="p-5 bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-slate-100 dark:border-slate-700 flex justify-between items-center group">
+                            <div className="flex items-center gap-4">
+                               <div className="w-10 h-10 bg-white dark:bg-slate-900 rounded-xl flex items-center justify-center border border-slate-100 dark:border-slate-800 text-brand-gold">
+                                  <MapPin size={20} />
+                               </div>
+                               <div>
+                                  <div className="text-sm font-black text-slate-800 dark:text-slate-100 uppercase leading-none mb-1">{j.from} → {j.to}</div>
+                                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{j.company}</div>
+                               </div>
+                            </div>
+                            <div className="text-lg font-black text-emerald-600">{j.amount.toLocaleString('tr-TR')} ₺</div>
+                         </div>
+                       ))}
+                       {dayDetails.jobs.length === 0 && <div className="p-10 text-center border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl text-slate-300 font-black uppercase italic">Kayıt Yok</div>}
+                    </div>
+                 </div>
+
+                 {/* Toplanmış Gider Listesi */}
+                 <div className="space-y-4">
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <ChevronRight size={14} className="text-red-500"/> TOPLANMIŞ GİDERLER
+                    </h4>
+                    <div className="space-y-3">
+                       {dayDetails.expenses.map(e => (
+                         <div key={e.type} className="p-5 bg-red-50/30 dark:bg-red-900/5 rounded-3xl border border-red-50 dark:border-red-900/20 flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                               <div className="w-10 h-10 bg-white dark:bg-slate-900 rounded-xl flex items-center justify-center border border-red-50 dark:border-red-900/20 text-red-500">
+                                  <CreditCard size={20} />
+                               </div>
+                               <div className="text-sm font-black text-slate-800 dark:text-slate-100 uppercase tracking-widest">{e.type}</div>
+                            </div>
+                            <div className="text-lg font-black text-red-600">{e.amount.toLocaleString('tr-TR')} ₺</div>
+                         </div>
+                       ))}
+                       {dayDetails.expenses.length === 0 && <div className="p-10 text-center border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl text-slate-300 font-black uppercase italic">Gider Yok</div>}
+                    </div>
+                 </div>
+              </div>
+            </div>
+
+            <div className="p-8 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+               <button onClick={() => setSelectedDateDetails(null)} className="w-full bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-sm shadow-xl hover:brightness-110 active:scale-95 transition-all">ANLATIMLI ÖZETİ KAPAT</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. ÜST KARTLAR */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard title="GÜNLÜK KAR" stats={daily} />
@@ -175,6 +290,7 @@ select cron.schedule(
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
           <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em] flex items-center gap-2"><Calendar size={18} className="text-indigo-500"/> GÜNLÜK İŞ DAĞILIMI</h3>
+          <span className="text-[10px] text-slate-400 font-bold italic">Tarihe tıklayarak o günün detaylarını görebilirsin kanka.</span>
         </div>
         <div className="overflow-x-auto">
            <table className="w-full text-left text-xs font-bold">
@@ -187,9 +303,12 @@ select cron.schedule(
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                 {dailyDistribution.map(d => (
-                  <tr key={d.date} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                  <tr key={d.date} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 group cursor-pointer" onClick={() => setSelectedDateDetails(d.iso)}>
                     <td className="px-8 py-5">
-                       <button className="text-indigo-600 dark:text-indigo-400 font-black hover:underline">{d.date}</button>
+                       <button className="text-indigo-600 dark:text-indigo-400 font-black group-hover:underline flex items-center gap-2">
+                          {d.date}
+                          <ChevronRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                       </button>
                     </td>
                     <td className="px-8 py-5 text-center text-slate-600 dark:text-slate-400">{d.count}</td>
                     <td className="px-8 py-5 text-right font-black text-emerald-600">{d.rev.toLocaleString('tr-TR')} ₺</td>
