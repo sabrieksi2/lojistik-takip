@@ -94,38 +94,46 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
-  // --- TELEGRAM BOT OTOMASYONU ---
+  // --- TELEGRAM BOT SAATLİK OTOMASYONU ---
   useEffect(() => {
     if (!tgConfig.autoSend || !tgConfig.botToken || !tgConfig.chatId) return;
 
     const checkAndSendTelegram = async () => {
       const todayStr = new Date().toISOString().split('T')[0];
+      const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
       const now = new Date();
       const hour = now.getHours();
       const min = now.getMinutes();
       
-      let slot: 'morning' | 'noon' | 'evening' | null = null;
-      if (hour === 9 && min >= 0 && min < 5) slot = 'morning';
-      if (hour === 13 && min >= 0 && min < 5) slot = 'noon';
-      if (hour === 21 && min >= 0 && min < 5) slot = 'evening';
+      // Her saatin ilk 5 dakikası içinde kontrol yap
+      if (min > 5) return;
 
-      if (!slot) return;
-
-      const alreadySent = tgLogs.some(log => log.date === todayStr && log.slot === slot);
+      const slotKey = `hour_${hour}`;
+      const alreadySent = tgLogs.some(log => log.date === todayStr && log.slot === slotKey);
       if (alreadySent) return;
 
-      const targetDate = (slot === 'evening') ? new Date(Date.now() + 86400000).toISOString().split('T')[0] : todayStr;
-      const jobsToNotify = scheduledJobs.filter(j => j.date === targetDate);
+      // Yaklaşan işleri topla (Bugün ve Yarın)
+      const todayJobs = scheduledJobs.filter(j => j.date === todayStr);
+      const tomorrowJobs = scheduledJobs.filter(j => j.date === tomorrowStr);
       
-      if (jobsToNotify.length === 0 && slot !== 'evening') return;
-
-      let message = `🚀 *BK LOJİSTİK - ${slot === 'evening' ? 'YARININ' : 'GÜNLÜK'} RAPORU*\n📅 Tarih: ${targetDate}\n\n`;
-      if (jobsToNotify.length === 0) {
-        message += `_Bugün plana kayıtlı iş bulunmuyor kanka._`;
+      let message = `🚀 *BK LOJİSTİK - SAATLİK RAPOR*\n⏰ Saat: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
+      
+      if (todayJobs.length === 0 && tomorrowJobs.length === 0) {
+        message += `_Kanka şu an için bugün veya yarın planlı bir iş görünmüyor. Dinlenmene bak!_ ☕`;
       } else {
-        jobsToNotify.forEach((j, i) => {
-          message += `*${i+1}. ${j.passengerName}*\n⏰ Saat: ${j.time}\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
-        });
+        if (todayJobs.length > 0) {
+          message += `*📅 BUGÜNKÜ İŞLER:*\n`;
+          todayJobs.forEach((j, i) => {
+            message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
+          });
+        }
+        
+        if (tomorrowJobs.length > 0) {
+          message += `*📅 YARINKİ İŞLER:*\n`;
+          tomorrowJobs.forEach((j, i) => {
+            message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n`;
+          });
+        }
       }
 
       try {
@@ -134,12 +142,15 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: tgConfig.chatId, text: message, parse_mode: 'Markdown' })
         });
+        
         if (response.ok) {
-          const newLog: TelegramLog = { date: todayStr, slot: slot };
+          const newLog: TelegramLog = { date: todayStr, slot: slotKey as any };
           setTgLogs(prev => {
             const next = [...prev, newLog];
-            triggerSync(undefined, undefined, undefined, undefined, undefined, next);
-            return next;
+            // Temizlik: 48 saatten eski logları sil (state şişmesin)
+            const filtered = next.slice(-100); 
+            triggerSync(undefined, undefined, undefined, undefined, undefined, filtered);
+            return filtered;
           });
         }
       } catch (err) { console.error("Telegram error:", err); }
