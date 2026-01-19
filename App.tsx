@@ -26,7 +26,8 @@ import {
   X,
   AlertCircle,
   Edit2,
-  Check
+  Check,
+  PlaneTakeoff
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig, TelegramLog } from './types';
@@ -38,6 +39,7 @@ import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 import ReportGenerator from './components/ReportGenerator';
+import FlightTracker from './components/FlightTracker';
 
 const isJobExpired = (date: string, time: string) => {
   const jobDateTime = new Date(`${date}T${time}`);
@@ -56,7 +58,7 @@ const getTimeRemaining = (date: string, time: string) => {
 };
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports'>('daily');
+  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports' | 'flights'>('daily');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [historicalDate, setHistoricalDate] = useState<string>(new Date(Date.now() - 86400000).toISOString().split('T')[0]);
   
@@ -104,11 +106,9 @@ const App: React.FC = () => {
       const now = new Date();
       const hour = now.getHours();
       
-      // Slot key 'hour_14' gibi benzersiz olacak
       const slotKey = `hour_${hour}`;
       const alreadySent = tgLogs.some(log => log.date === todayStr && log.slot === slotKey);
       
-      // Eğer bu saat dilimi için henüz mesaj gitmemişse dakikaya bakmadan gönder!
       if (alreadySent) return;
 
       const todayJobs = scheduledJobs.filter(j => j.date === todayStr);
@@ -144,7 +144,7 @@ const App: React.FC = () => {
         if (response.ok) {
           const newLog: TelegramLog = { date: todayStr, slot: slotKey };
           setTgLogs(prev => {
-            const next = [...prev, newLog].slice(-50); // Son 50 logu tutmak yeterli
+            const next = [...prev, newLog].slice(-50);
             triggerSync(undefined, undefined, undefined, undefined, undefined, next);
             return next;
           });
@@ -152,12 +152,10 @@ const App: React.FC = () => {
       } catch (err) { console.error("Telegram error:", err); }
     };
 
-    // Her 30 saniyede bir saati kontrol et (dakika bekleme derdi yok)
     const interval = setInterval(checkAndSendTelegram, 30000); 
     return () => clearInterval(interval);
   }, [tgConfig, scheduledJobs, tgLogs]);
 
-  // Rest of the code remains the same... (puling, pushing, handlers etc.)
   const uniqueCompanies = useMemo(() => {
     const companies = new Set<string>();
     jobs.forEach(j => companies.add(j.company));
@@ -406,6 +404,9 @@ const App: React.FC = () => {
         <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'scheduled' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <CalendarClock size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Tersan</span>
         </button>
+        <button onClick={() => setView('flights')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'flights' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <PlaneTakeoff size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Uçuş Takip</span>
+        </button>
         <button onClick={() => setView('reports')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'reports' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <FileText size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Rapor</span>
         </button>
@@ -608,6 +609,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        {view === 'flights' && <FlightTracker />}
 
         {view === 'reports' && (
           <ReportGenerator scheduledJobs={scheduledJobs} finishedJobs={finishedJobs} />

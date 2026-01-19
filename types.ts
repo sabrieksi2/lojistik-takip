@@ -46,3 +46,16 @@ export interface TelegramLog {
   date: string; // YYYY-MM-DD
   slot: string; // 'hour_0' ... 'hour_23' veya eski slotlar
 }
+
+export interface FlightInfo {
+  flightNumber: string;
+  status: string;
+  departure: string;
+  arrival: string;
+  scheduledArrival: string;
+  actualArrival: string;
+  delay: string;
+  gate: string;
+  lastUpdated: string;
+  sources?: { web: { uri: string; title: string } }[];
+}
