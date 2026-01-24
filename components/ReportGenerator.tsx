@@ -8,9 +8,12 @@ import { ScheduledJob } from '../types';
 interface ReportGeneratorProps {
   scheduledJobs: ScheduledJob[];
   finishedJobs: ScheduledJob[];
+  fixedFees: any;
+  setFixedFees: (fees: any) => void;
 }
 
-type WorkModel = 'ist-pickup' | 'ist-dropoff' | 'saw' | 'manual';
+/* Updated WorkModel to include 'none' for consistency with types.ts */
+type WorkModel = 'ist-pickup' | 'ist-dropoff' | 'saw' | 'manual' | 'none';
 
 interface ExtraItem {
   id: string;
@@ -28,25 +31,13 @@ interface ManualConfig {
   extras: ExtraItem[];
 }
 
-const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finishedJobs }) => {
+const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finishedJobs, fixedFees, setFixedFees }) => {
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [jobConfigs, setJobConfigs] = useState<Record<string, WorkModel>>({});
   const [manualConfigs, setManualConfigs] = useState<Record<string, ManualConfig>>({});
   const [isSaved, setIsSaved] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-
-  const [fixedFees, setFixedFees] = useState(() => {
-    const saved = localStorage.getItem('bk_report_fees');
-    return saved ? JSON.parse(saved) : {
-      service: 0,
-      ferry: 0,
-      yss: 0,
-      marmara: 0,
-      osmangazi: 0,
-      parking: 0
-    };
-  });
 
   const saveFees = () => {
     localStorage.setItem('bk_report_fees', JSON.stringify(fixedFees));
@@ -204,15 +195,16 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
           if (cfg.osmangazi) addCost('osmangazi', 'Osmangazi');
           if (cfg.parking) addCost('parking', 'Otopark');
           
-          // Extras logic for PDF
           cfg.extras.forEach(extra => {
             const extraFee = Number(extra.fee) || 0;
             subTotal += extraFee;
             grandTotalExtras += extraFee;
             costs.push(`${extra.name || 'Ekstra'}: ${extraFee} TL`);
           });
+        } else if (model === 'none') {
+          /* Add only service fee for 'none' model in reports */
+          addCost('service', 'Hizmet');
         } else {
-          // Standard Models
           addCost('service', 'Hizmet');
           addCost('ferry', 'Gemi');
           addCost('osmangazi', 'Osmangazi');
@@ -265,7 +257,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       pdf.save(`BK_Turizm_Raporu_${startDate}_${endDate}.pdf`);
     } catch (error) {
       console.error('PDF error:', error);
-      alert('Hata oluştu kanka, konsola bak.');
+      alert('Hata oluştu kanka.');
     } finally {
       document.body.removeChild(container);
       setIsGenerating(false);
@@ -319,7 +311,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
               <div key={fee.id} className="space-y-1">
                 <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">{fee.label}</label>
                 <div className="relative">
-                  <input type="number" value={fixedFees[fee.id as keyof typeof fixedFees]} onChange={e => setFixedFees(prev => ({...prev, [fee.id]: e.target.value}))} className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-black text-brand-navy dark:text-brand-gold outline-none focus:ring-2 focus:ring-brand-gold/50" />
+                  <input type="number" value={fixedFees[fee.id as keyof typeof fixedFees]} onChange={e => setFixedFees((prev: any) => ({...prev, [fee.id]: e.target.value}))} className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-black text-brand-navy dark:text-brand-gold outline-none focus:ring-2 focus:ring-brand-gold/50" />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] opacity-30">₺</span>
                 </div>
               </div>
@@ -371,6 +363,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                         <option value="ist-dropoff">2 - İST Havalimanı Bırakış (Otopark Hariç)</option>
                         <option value="saw">3 - Sabiha Gökçen (Gemi + Osmangazi)</option>
                         <option value="manual">4 - ÖZEL SEFER (MANUEL SEÇİM)</option>
+                        <option value="none">5 - GİDER GİRME (SADECE HİZMET)</option>
                       </select>
                     </div>
                   </div>
@@ -382,7 +375,6 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                           <Settings2 size={12} /> Manuel Parametre Seçimi
                         </div>
                         
-                        {/* Standart Kalemler */}
                         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
                           {[
                             { key: 'service', label: 'Hizmet' },
@@ -403,7 +395,6 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                           ))}
                         </div>
 
-                        {/* Ekstra Kalemler Bölümü */}
                         <div className="border-t border-brand-gold/20 pt-4">
                           <div className="flex items-center justify-between mb-3">
                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ekstra Kalemler (Bekleme, Yemek vb.)</span>
@@ -422,7 +413,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                                   type="text" 
                                   value={extra.name}
                                   onChange={(e) => updateExtraItem(job.id, extra.id, { name: e.target.value })}
-                                  placeholder="Kalem Adı (örn: Ekstra Bekleme)"
+                                  placeholder="Kalem Adı"
                                   className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[10px] font-bold outline-none focus:ring-1 focus:ring-brand-gold"
                                 />
                                 <div className="relative w-32">
@@ -443,9 +434,6 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
                                 </button>
                               </div>
                             ))}
-                            {manualConfigs[job.id]?.extras.length === 0 && (
-                              <p className="text-[9px] font-medium text-slate-400 italic">Henüz ekstra kalem eklenmedi.</p>
-                            )}
                           </div>
                         </div>
                       </div>

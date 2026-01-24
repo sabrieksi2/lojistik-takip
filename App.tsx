@@ -27,10 +27,17 @@ import {
   AlertCircle,
   Edit2,
   Check,
-  PlaneTakeoff
+  PlaneTakeoff,
+  PlaneLanding,
+  Settings,
+  Car,
+  Plus,
+  Settings2,
+  Square,
+  CheckSquare
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig, TelegramLog } from './types';
+import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig, TelegramLog, WorkModel } from './types';
 
 // Components
 import JobForm from './components/JobForm';
@@ -40,11 +47,6 @@ import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 import ReportGenerator from './components/ReportGenerator';
 import FlightTracker from './components/FlightTracker';
-
-const isJobExpired = (date: string, time: string) => {
-  const jobDateTime = new Date(`${date}T${time}`);
-  return jobDateTime.getTime() < Date.now();
-};
 
 const getTimeRemaining = (date: string, time: string) => {
   const diff = new Date(`${date}T${time}`).getTime() - Date.now();
@@ -56,6 +58,22 @@ const getTimeRemaining = (date: string, time: string) => {
   if (hours > 0) return `${hours}s ${minutes}dk`;
   return `${minutes}dk`;
 };
+
+interface ExtraItem {
+  id: string;
+  name: string;
+  fee: number;
+}
+
+interface ManualConfig {
+  service: boolean;
+  ferry: boolean;
+  yss: boolean;
+  marmara: boolean;
+  osmangazi: boolean;
+  parking: boolean;
+  extras: ExtraItem[];
+}
 
 const App: React.FC = () => {
   const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports' | 'flights'>('daily');
@@ -76,7 +94,12 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('logistics_tg_logs');
     return saved ? JSON.parse(saved) : [];
   });
-  
+
+  const [fixedFees, setFixedFees] = useState(() => {
+    const saved = localStorage.getItem('bk_report_fees');
+    return saved ? JSON.parse(saved) : { service: 0, ferry: 0, yss: 0, marmara: 0, osmangazi: 0, parking: 0 };
+  });
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [isCloudActive, setIsCloudActive] = useState(false);
@@ -86,6 +109,14 @@ const App: React.FC = () => {
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
   const [finishedJobs, setFinishedJobs] = useState<ScheduledJob[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+
+  // Selection states for confirmation
+  const [pendingJob, setPendingJob] = useState<ScheduledJob | null>(null);
+  const [showModelModal, setShowModelModal] = useState(false);
+  const [showCustomUI, setShowCustomUI] = useState(false);
+  const [manualConfig, setManualConfig] = useState<ManualConfig>({
+    service: true, ferry: false, yss: false, marmara: false, osmangazi: false, parking: false, extras: []
+  });
 
   // Editing states
   const [editingFinishedId, setEditingFinishedId] = useState<string | null>(null);
@@ -102,36 +133,20 @@ const App: React.FC = () => {
 
     const checkAndSendTelegram = async () => {
       const todayStr = new Date().toISOString().split('T')[0];
-      const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-      const now = new Date();
-      const hour = now.getHours();
-      
+      const hour = new Date().getHours();
       const slotKey = `hour_${hour}`;
-      const alreadySent = tgLogs.some(log => log.date === todayStr && log.slot === slotKey);
-      
-      if (alreadySent) return;
+      if (tgLogs.some(log => log.date === todayStr && log.slot === slotKey)) return;
 
       const todayJobs = scheduledJobs.filter(j => j.date === todayStr);
-      const tomorrowJobs = scheduledJobs.filter(j => j.date === tomorrowStr);
-      
       let message = `🚀 *BK LOJİSTİK - SAATLİK DURUM*\n⏰ Rapor Saati: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
       
-      if (todayJobs.length === 0 && tomorrowJobs.length === 0) {
-        message += `_Kanka bugün ve yarın için planlı bir transferin görünmüyor. Her şey yolunda!_ 🍀`;
+      if (todayJobs.length === 0) {
+        message += `_Kanka şu an planlı bir transferin görünmüyor. İyi dinlenmeler!_ 🍀`;
       } else {
-        if (todayJobs.length > 0) {
-          message += `*📅 BUGÜNKÜ PLANIN:*\n`;
-          todayJobs.forEach((j, i) => {
-            message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
-          });
-        }
-        
-        if (tomorrowJobs.length > 0) {
-          message += `*📅 YARINKİ PLANIN:*\n`;
-          tomorrowJobs.forEach((j, i) => {
-            message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n`;
-          });
-        }
+        message += `*📅 BUGÜNKÜ PLANIN:*\n`;
+        todayJobs.forEach((j, i) => {
+          message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
+        });
       }
 
       try {
@@ -140,7 +155,6 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: tgConfig.chatId, text: message, parse_mode: 'Markdown' })
         });
-        
         if (response.ok) {
           const newLog: TelegramLog = { date: todayStr, slot: slotKey };
           setTgLogs(prev => {
@@ -151,7 +165,6 @@ const App: React.FC = () => {
         }
       } catch (err) { console.error("Telegram error:", err); }
     };
-
     const interval = setInterval(checkAndSendTelegram, 30000); 
     return () => clearInterval(interval);
   }, [tgConfig, scheduledJobs, tgLogs]);
@@ -164,13 +177,9 @@ const App: React.FC = () => {
   }, [jobs, scheduledJobs]);
 
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
+    if (darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+    localStorage.setItem('theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
   const supabase = useMemo(() => {
@@ -231,7 +240,8 @@ const App: React.FC = () => {
     localStorage.setItem('logistics_expenses', JSON.stringify(expenses));
     localStorage.setItem('logistics_tg_config', JSON.stringify(tgConfig));
     localStorage.setItem('logistics_tg_logs', JSON.stringify(tgLogs));
-  }, [jobs, scheduledJobs, finishedJobs, expenses, tgConfig, tgLogs]);
+    localStorage.setItem('bk_report_fees', JSON.stringify(fixedFees));
+  }, [jobs, scheduledJobs, finishedJobs, expenses, tgConfig, tgLogs, fixedFees]);
 
   const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; title: string; message: string; confirmText: string; type: 'danger' | 'success' | 'info'; onConfirm: () => void; }>({ isOpen: false, title: '', message: '', confirmText: '', type: 'info', onConfirm: () => {} });
 
@@ -269,37 +279,125 @@ const App: React.FC = () => {
   };
 
   const handleConfirmArrivalAction = (job: ScheduledJob) => {
-    setModalConfig({
-      isOpen: true, title: 'Varış Onayla', message: `${job.passengerName} isimli yolcunun yolculuğunun tamamlandığını onaylıyor musunuz?`, confirmText: 'Onayla', type: 'success',
-      onConfirm: () => {
-        const originalDateTime = new Date(`${job.date}T${job.time}:00`);
-        const newDailyJob: Job = { 
-          id: job.id + '_confirmed', 
-          company: job.company, 
-          from: job.from, 
-          to: job.to, 
-          amount: job.fee, 
-          date: originalDateTime.toISOString(), 
-          timestamp: originalDateTime.getTime(), 
-          isAutoGenerated: true 
-        };
-        setJobs(prev => {
-          const next = [newDailyJob, ...prev].sort((a, b) => b.timestamp - a.timestamp);
-          triggerSync(next);
-          return next;
-        });
-        setFinishedJobs(prev => {
-          const next = [job, ...prev];
-          triggerSync(undefined, undefined, next);
-          return next;
-        });
-        setScheduledJobs(prev => {
-          const next = prev.filter(sj => sj.id !== job.id);
-          triggerSync(undefined, next);
-          return next;
-        });
+    setPendingJob(job);
+    setShowModelModal(true);
+    setShowCustomUI(false);
+    setManualConfig({ service: true, ferry: false, yss: false, marmara: false, osmangazi: false, parking: false, extras: [] });
+  };
+
+  const completeJobWithModel = (model: WorkModel | 'none') => {
+    if (!pendingJob) return;
+    
+    const job = pendingJob;
+    const originalDateTime = new Date(`${job.date}T${job.time}:00`);
+    const dateStr = originalDateTime.toISOString();
+    const confirmedJobId = job.id + '_confirmed';
+
+    // 1. Önceki aynı işe ait giderleri temizle (Düzenleme durumları için)
+    let nextExpenses = expenses.filter(e => e.jobId !== confirmedJobId);
+
+    // 2. Gelir Girişi (Varsa güncelle, yoksa ekle)
+    const existingJob = jobs.find(j => j.id === confirmedJobId);
+    let nextJobs = [...jobs];
+    if (existingJob) {
+      nextJobs = nextJobs.map(j => j.id === confirmedJobId ? { ...j, workModel: model } : j);
+    } else {
+      const newDailyJob: Job = { 
+        id: confirmedJobId, 
+        company: job.company, 
+        from: job.from, 
+        to: job.to, 
+        amount: job.fee, 
+        date: dateStr, 
+        timestamp: originalDateTime.getTime(), 
+        isAutoGenerated: true,
+        workModel: model
+      };
+      nextJobs = [newDailyJob, ...nextJobs].sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    // 3. Otomatik Gider Hesaplama
+    const generatedExpenses: Expense[] = [];
+    const addExp = (type: ExpenseType, amount: number) => {
+      if (amount <= 0) return;
+      generatedExpenses.push({
+        id: Math.random().toString(36).substr(2, 9),
+        type,
+        amount,
+        date: dateStr,
+        jobId: confirmedJobId
+      });
+    };
+
+    if (model === 'manual') {
+      const fees = fixedFees;
+      if (manualConfig.service) addExp('Diğer', Number(fees.service));
+      if (manualConfig.ferry) addExp('Gemi', Number(fees.ferry));
+      if (manualConfig.yss) addExp('Köprü', Number(fees.yss));
+      if (manualConfig.marmara) addExp('Köprü', Number(fees.marmara));
+      if (manualConfig.osmangazi) addExp('Köprü', Number(fees.osmangazi));
+      if (manualConfig.parking) addExp('Diğer', Number(fees.parking));
+      
+      manualConfig.extras.forEach(extra => {
+        addExp('Diğer', Number(extra.fee));
+      });
+    } else if (model !== 'none') {
+      const fees = fixedFees;
+      // Gemi
+      addExp('Gemi', Number(fees.ferry));
+      
+      // Köprü (YSS + Marmara + Osmangazi)
+      let bridgeTotal = Number(fees.osmangazi);
+      if (model === 'ist-pickup' || model === 'ist-dropoff') {
+        bridgeTotal += Number(fees.yss) + Number(fees.marmara);
       }
-    });
+      addExp('Köprü', bridgeTotal);
+
+      // Otopark (Diğer)
+      if (model === 'ist-pickup') {
+        addExp('Diğer', Number(fees.parking));
+      }
+    }
+
+    nextExpenses = [...generatedExpenses, ...nextExpenses];
+
+    const nextFinished = finishedJobs.some(fj => fj.id === job.id) ? finishedJobs : [job, ...finishedJobs];
+    const nextScheduled = scheduledJobs.filter(sj => sj.id !== job.id);
+
+    setJobs(nextJobs);
+    setFinishedJobs(nextFinished);
+    setScheduledJobs(nextScheduled);
+    setExpenses(nextExpenses);
+    
+    triggerSync(nextJobs, nextScheduled, nextFinished, nextExpenses);
+    
+    setShowModelModal(false);
+    setPendingJob(null);
+  };
+
+  const toggleManualParam = (param: keyof Omit<ManualConfig, 'extras'>) => {
+    setManualConfig(prev => ({ ...prev, [param]: !prev[param] }));
+  };
+
+  const addExtraItem = () => {
+    setManualConfig(prev => ({
+      ...prev,
+      extras: [...prev.extras, { id: Math.random().toString(36).substr(2, 9), name: '', fee: 0 }]
+    }));
+  };
+
+  const updateExtraItem = (id: string, updates: Partial<ExtraItem>) => {
+    setManualConfig(prev => ({
+      ...prev,
+      extras: prev.extras.map(item => item.id === id ? { ...item, ...updates } : item)
+    }));
+  };
+
+  const removeExtraItem = (id: string) => {
+    setManualConfig(prev => ({
+      ...prev,
+      extras: prev.extras.filter(item => item.id !== id)
+    }));
   };
 
   const handleDeleteJobAction = (job: Job) => {
@@ -323,23 +421,20 @@ const App: React.FC = () => {
       onConfirm: () => {
         const next = finishedJobs.filter(fj => fj.id !== job.id);
         setFinishedJobs(next);
-        triggerSync(undefined, undefined, next);
+        // İlgili otomatik işi ve giderleri de sil
+        const nextJobs = jobs.filter(j => j.id !== job.id + '_confirmed');
+        const nextExpenses = expenses.filter(e => e.jobId !== job.id + '_confirmed');
+        setJobs(nextJobs);
+        setExpenses(nextExpenses);
+        triggerSync(nextJobs, undefined, next, nextExpenses);
       }
     });
   };
 
   const handleDeleteExpenseAction = (expense: Expense) => {
     setModalConfig({ 
-      isOpen: true, 
-      title: 'Gider Kaydını Sil', 
-      message: `${expense.type} - ${expense.amount}₺ tutarındaki gider kaydını silmek istediğine emin misin?`, 
-      confirmText: 'Sil', 
-      type: 'danger',
-      onConfirm: () => { 
-        const next = expenses.filter(e => e.id !== expense.id); 
-        setExpenses(next); 
-        triggerSync(undefined, undefined, undefined, next); 
-      }
+      isOpen: true, title: 'Gider Kaydını Sil', message: `${expense.type} - ${expense.amount}₺ tutarındaki gider kaydını silmek istediğine emin misin?`, confirmText: 'Sil', type: 'danger',
+      onConfirm: () => { const next = expenses.filter(e => e.id !== expense.id); setExpenses(next); triggerSync(undefined, undefined, undefined, next); }
     });
   };
 
@@ -368,6 +463,93 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen transition-colors duration-300">
       <ConfirmationModal isOpen={modalConfig.isOpen} onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} onConfirm={modalConfig.onConfirm} title={modalConfig.title} message={modalConfig.message} confirmText={modalConfig.confirmText} type={modalConfig.type} />
+
+      {/* Model Selection Modal */}
+      {showModelModal && pendingJob && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-brand-navy/90 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-brand-gold/30 flex flex-col gap-6 animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
+             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-brand-navy rounded-2xl text-brand-gold"><Car size={32} /></div>
+                  <div>
+                    <h3 className="text-xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-widest">MODEL SEÇ VE ONAYLA</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{pendingJob.passengerName} - {pendingJob.fee} ₺</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowModelModal(false); setPendingJob(null); }} className="p-2 text-slate-400 hover:text-red-500 transition-colors"><X size={24}/></button>
+             </div>
+             
+             {!showCustomUI ? (
+               <>
+                 <p className="text-xs font-medium text-slate-600 dark:text-slate-400">Bu iş için kullanılacak çalışma modelini seçin kanka.</p>
+                 <div className="grid grid-cols-1 gap-3">
+                    <button onClick={() => completeJobWithModel('ist-pickup')} className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 hover:bg-brand-navy hover:text-white dark:hover:bg-brand-gold dark:hover:text-brand-navy rounded-2xl border border-slate-100 dark:border-slate-700 transition-all group">
+                       <span className="text-xs font-black uppercase tracking-widest">İST Havalimanı Alış</span>
+                       <PlaneTakeoff size={18} className="opacity-40 group-hover:opacity-100" />
+                    </button>
+                    <button onClick={() => completeJobWithModel('ist-dropoff')} className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 hover:bg-brand-navy hover:text-white dark:hover:bg-brand-gold dark:hover:text-brand-navy rounded-2xl border border-slate-100 dark:border-slate-700 transition-all group">
+                       <span className="text-xs font-black uppercase tracking-widest">İST Havalimanı Bırakış</span>
+                       <PlaneLanding size={18} className="opacity-40 group-hover:opacity-100" />
+                    </button>
+                    <button onClick={() => completeJobWithModel('saw')} className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 hover:bg-brand-navy hover:text-white dark:hover:bg-brand-gold dark:hover:text-brand-navy rounded-2xl border border-slate-100 dark:border-slate-700 transition-all group">
+                       <span className="text-xs font-black uppercase tracking-widest">Sabiha Gökçen / Diğer</span>
+                       <MapPin size={18} className="opacity-40 group-hover:opacity-100" />
+                    </button>
+                    <button onClick={() => setShowCustomUI(true)} className="flex items-center justify-between p-5 bg-brand-gold/10 dark:bg-brand-gold/10 hover:bg-brand-gold hover:text-brand-navy rounded-2xl border border-brand-gold/30 transition-all group">
+                       <span className="text-xs font-black uppercase tracking-widest text-brand-gold group-hover:text-brand-navy">ÖZEL SEÇİM (MANUEL)</span>
+                       <Settings2 size={18} className="text-brand-gold group-hover:text-brand-navy" />
+                    </button>
+                    <button onClick={() => completeJobWithModel('none')} className="flex items-center justify-between p-5 bg-slate-100/50 dark:bg-slate-800/20 hover:bg-red-500 hover:text-white rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 transition-all group">
+                       <span className="text-xs font-black uppercase tracking-widest text-slate-400 group-hover:text-white">GİDER GİRME (SADECE CİRO)</span>
+                       <X size={18} className="opacity-20 group-hover:opacity-100" />
+                    </button>
+                 </div>
+               </>
+             ) : (
+               <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { key: 'service', label: 'Hizmet' },
+                      { key: 'ferry', label: 'Gemi' },
+                      { key: 'yss', label: 'YSS' },
+                      { key: 'marmara', label: 'Marmara' },
+                      { key: 'osmangazi', label: 'Osmangazi' },
+                      { key: 'parking', label: 'Otopark' }
+                    ].map((item) => (
+                      <button 
+                        key={item.key}
+                        onClick={() => toggleManualParam(item.key as keyof Omit<ManualConfig, 'extras'>)}
+                        className={`flex items-center gap-2 p-4 rounded-xl border transition-all text-[10px] font-black uppercase tracking-tighter ${manualConfig[item.key as keyof Omit<ManualConfig, 'extras'>] ? 'bg-brand-navy text-white border-brand-navy dark:bg-brand-gold dark:text-brand-navy dark:border-brand-gold' : 'bg-slate-50 dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-brand-gold/50'}`}
+                      >
+                        {manualConfig[item.key as keyof Omit<ManualConfig, 'extras'>] ? <CheckSquare size={16} /> : <Square size={16} />}
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ekstra Kalemler</span>
+                       <button onClick={addExtraItem} className="p-2 bg-brand-gold/20 text-brand-gold rounded-lg hover:bg-brand-gold/30 transition-all"><Plus size={16}/></button>
+                    </div>
+                    {manualConfig.extras.map(extra => (
+                      <div key={extra.id} className="flex gap-2 animate-in slide-in-from-left-2 duration-200">
+                         <input type="text" value={extra.name} onChange={e => updateExtraItem(extra.id, {name: e.target.value})} placeholder="Kalem" className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-xs font-bold" />
+                         <input type="number" value={extra.fee || ''} onChange={e => updateExtraItem(extra.id, {fee: Number(e.target.value)})} placeholder="0 ₺" className="w-24 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-xs font-black text-brand-gold" />
+                         <button onClick={() => removeExtraItem(extra.id)} className="text-red-400 hover:text-red-600 transition-colors"><Trash2 size={16}/></button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                     <button onClick={() => setShowCustomUI(false)} className="flex-1 px-4 py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-[10px] uppercase">Geri Dön</button>
+                     <button onClick={() => completeJobWithModel('manual')} className="flex-2 px-8 py-4 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black rounded-2xl text-[10px] uppercase shadow-xl">Manuel Seçimi Onayla</button>
+                  </div>
+               </div>
+             )}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className={`text-white px-4 py-2 flex justify-between items-center text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-lg transition-all duration-500 z-[100] ${isCloudActive ? (syncFlash ? 'bg-brand-gold scale-[1.01]' : 'bg-brand-navy') : 'bg-slate-800'}`}>
@@ -593,7 +775,8 @@ const App: React.FC = () => {
                                <div className="flex items-center gap-4 mt-4 md:mt-0">
                                  <div className="text-sm font-black text-emerald-600">{job.fee.toLocaleString('tr-TR')} ₺</div>
                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => { setEditingFinishedId(job.id); setFinishedEditBuffer({...job}); }} className="p-2 text-slate-400 hover:text-brand-navy dark:hover:text-brand-gold transition-colors" title="Düzenle"><Edit2 size={16} /></button>
+                                    <button onClick={() => handleConfirmArrivalAction(job)} className="p-2 text-slate-400 hover:text-brand-navy dark:hover:text-brand-gold transition-colors" title="Model Düzenle"><Settings2 size={16} /></button>
+                                    <button onClick={() => { setEditingFinishedId(job.id); setFinishedEditBuffer({...job}); }} className="p-2 text-slate-400 hover:text-brand-navy dark:hover:text-brand-gold transition-colors" title="Verileri Düzenle"><Edit2 size={16} /></button>
                                     <button onClick={() => handleDeleteFinishedJobAction(job)} className="p-2 text-slate-400 hover:text-red-500 transition-colors" title="Kaydı Sil"><Trash2 size={16} /></button>
                                  </div>
                                  <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-md uppercase">BİTTİ</span>
@@ -613,7 +796,7 @@ const App: React.FC = () => {
         {view === 'flights' && <FlightTracker />}
 
         {view === 'reports' && (
-          <ReportGenerator scheduledJobs={scheduledJobs} finishedJobs={finishedJobs} />
+          <ReportGenerator scheduledJobs={scheduledJobs} finishedJobs={finishedJobs} fixedFees={fixedFees} setFixedFees={setFixedFees} />
         )}
 
         {view === 'stats' && (
@@ -623,7 +806,7 @@ const App: React.FC = () => {
             scheduledJobs={scheduledJobs} 
             dbConfig={dbConfig} 
             tgConfig={tgConfig}
-            onDbConfigChange={(c) => { setDbConfig(c); localStorage.setItem('logistics_db_config', JSON.stringify(c)); pullFromCloud(); }} 
+            onDbConfigChange={(c) => { setDbConfig(c); pullFromCloud(); }} 
             onTgConfigChange={(c) => { setTgConfig(c); triggerSync(undefined, undefined, undefined, undefined, c); }}
             onSyncRequest={pullFromCloud}
             onDeleteJob={handleDeleteJobAction}

@@ -1,217 +1,181 @@
 
-import React, { useState } from 'react';
-import { Search, Plane, Loader2, PlaneTakeoff, PlaneLanding, Radar, Info, Clock, MapPin, Gauge, AlertCircle, Calendar } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
+import React, { useState, useEffect } from 'react';
+// Added 'Clock' to the imports to fix the "Cannot find name 'Clock'" error on line 165.
+import { Search, Plane, Loader2, PlaneTakeoff, PlaneLanding, Radar, Map as MapIcon, RefreshCw, ExternalLink, Info, Gauge, Clock } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
 
 interface ParsedFlightInfo {
   departure: string;
   arrival: string;
   aircraftModel: string;
-  scheduledArrival: string;
   estimatedArrival: string;
-  delayInfo: string;
-  logisticsNote: string;
+  status: string;
 }
 
 const FlightTracker: React.FC = () => {
   const [flightNo, setFlightNo] = useState('');
   const [loading, setLoading] = useState(false);
   const [flightDetails, setFlightDetails] = useState<ParsedFlightInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [radarKey, setRadarKey] = useState(0); // Iframe'i yenilemek için
+  const [radarKey, setRadarKey] = useState(Date.now());
+  const [mapSource, setMapSource] = useState<'fr24' | 'radarbox'>('fr24');
 
   const trackFlight = async () => {
-    if (!flightNo) return;
+    const cleanFlightNo = flightNo.trim().toUpperCase();
+    if (!cleanFlightNo) return;
     
     setLoading(true);
-    setError(null);
+    // Haritayı hemen güncellemek için key'i değiştiriyoruz
+    setRadarKey(Date.now());
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      const prompt = `Uçuş numarasını analiz et: ${flightNo}. 
-      Lütfen şu bilgileri içeren bir JSON objesi döndür: 
-      - departure (Kalkış havalimanı ve şehir)
-      - arrival (Varış havalimanı ve şehir)
-      - aircraftModel (Uçağın modeli örn: Boeing 737-800)
-      - scheduledArrival (Planlanan iniş saati)
-      - estimatedArrival (Tahmini veya gerçekleşen iniş saati)
-      - delayInfo (Varsa rötar süresi ve nedeni, yoksa 'Rötar Yok' yaz)
-      - logisticsNote (Bu uçuşun lojistik operasyonu için kısa bir teknik not)
-      Dil Türkçe olsun.`;
+      const prompt = `${cleanFlightNo} uçuş numarası için şu bilgileri kısa ve net getir: 
+      {
+        "departure": "Şehir (Havalimanı Kodu)",
+        "arrival": "Şehir (Havalimanı Kodu)",
+        "aircraftModel": "Model",
+        "estimatedArrival": "Saat",
+        "status": "Durum Özeti"
+      }`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              departure: { type: Type.STRING },
-              arrival: { type: Type.STRING },
-              aircraftModel: { type: Type.STRING },
-              scheduledArrival: { type: Type.STRING },
-              estimatedArrival: { type: Type.STRING },
-              delayInfo: { type: Type.STRING },
-              logisticsNote: { type: Type.STRING },
-            },
-            required: ["departure", "arrival", "aircraftModel", "scheduledArrival", "estimatedArrival", "delayInfo", "logisticsNote"]
-          }
-        }
+        config: { responseMimeType: "application/json" }
       });
 
       const data = JSON.parse(response.text) as ParsedFlightInfo;
       setFlightDetails(data);
-      setRadarKey(prev => prev + 1); // Haritayı uçağa odaklar
-
-    } catch (err: any) {
-      console.error("API Error:", err);
-      setError("AI Analizi şu an yapılamıyor ama radar üzerinden manuel takip edebilirsin kanka.");
+    } catch (err) {
+      console.error("Flight info error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      {/* Search Header */}
-      <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="flex items-center gap-6">
-            <div className="p-5 bg-brand-navy rounded-2xl text-white shadow-xl shadow-brand-navy/20">
-              <Radar size={32} className="text-brand-gold animate-pulse" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-widest">LOJİSTİK UÇUŞ KOMUTA</h2>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Havalimanı Transfer & VIP Koordinasyon</p>
-            </div>
-          </div>
+  const getMapUrl = () => {
+    const cleanNo = flightNo.trim().toUpperCase();
+    if (mapSource === 'fr24') {
+      return cleanNo 
+        ? `https://www.flightradar24.com/simple?flight=${cleanNo}&z=7&label1=flight&label2=aircraft`
+        : `https://www.flightradar24.com/simple?lat=41.01&lon=28.97&z=6`;
+    } else {
+      return cleanNo
+        ? `https://www.radarbox.com/widget?flight=${cleanNo}&z=7`
+        : `https://www.radarbox.com/widget?lat=41.01&lng=28.97&z=6`;
+    }
+  };
 
-          <div className="w-full md:w-[450px] relative">
-            <input 
-              type="text" 
-              value={flightNo} 
-              onChange={(e) => setFlightNo(e.target.value)}
-              placeholder="Uçuş No Girin (Örn: TK1752)"
-              className="w-full pl-6 pr-24 py-5 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-2xl text-lg font-black uppercase tracking-widest focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold outline-none transition-all shadow-inner text-slate-800 dark:text-white"
-              onKeyDown={(e) => e.key === 'Enter' && trackFlight()}
-            />
-            <button 
-              onClick={trackFlight}
-              disabled={loading || !flightNo}
-              className="absolute right-2 top-2 bottom-2 px-8 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-xl font-black text-sm uppercase flex items-center justify-center transition-all active:scale-95 disabled:opacity-50 shadow-lg"
-            >
-              {loading ? <Loader2 size={24} className="animate-spin" /> : "SORGULA"}
-            </button>
+  return (
+    <div className="space-y-6 animate-in fade-in duration-700">
+      {/* Search Bar - Sticky on top */}
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-[2rem] shadow-2xl border border-brand-gold/20 flex flex-col md:flex-row gap-4 items-center">
+        <div className="flex-1 w-full relative group">
+          <div className="absolute left-6 top-1/2 -translate-y-1/2 text-brand-gold group-focus-within:scale-110 transition-transform">
+            <Radar size={24} className={loading ? "animate-spin" : ""} />
           </div>
+          <input 
+            type="text" 
+            value={flightNo} 
+            onChange={(e) => setFlightNo(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && trackFlight()}
+            placeholder="Uçuş No (TK1234, PC456...)"
+            className="w-full pl-16 pr-6 py-5 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-2xl text-xl font-black uppercase tracking-[0.2em] focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold outline-none transition-all text-slate-800 dark:text-white"
+          />
+        </div>
+        
+        <div className="flex gap-2 w-full md:w-auto">
+          <button 
+            onClick={trackFlight}
+            disabled={loading || !flightNo}
+            className="flex-1 md:flex-none px-10 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-2xl font-black text-sm uppercase shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+          >
+            TAKİP ET
+          </button>
+          <button 
+            onClick={() => { setMapSource(mapSource === 'fr24' ? 'radarbox' : 'fr24'); setRadarKey(Date.now()); }}
+            className="p-5 bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-brand-gold rounded-2xl transition-colors"
+            title="Harita Kaynağını Değiştir"
+          >
+            <RefreshCw size={24} className={loading ? "animate-spin" : ""} />
+          </button>
         </div>
       </div>
 
-      {error && (
-        <div className="p-5 bg-amber-50 dark:bg-amber-900/10 border-2 border-dashed border-amber-200 dark:border-amber-900/30 rounded-3xl flex items-center gap-4 text-amber-700 dark:text-amber-400 font-bold text-xs animate-in slide-in-from-top-2">
-          <AlertCircle size={24} />
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Radar Panel */}
-        <div className="lg:col-span-8 h-[650px] bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden relative group">
-          <div className="absolute top-6 left-6 right-6 p-4 bg-brand-navy/80 backdrop-blur-xl text-white z-10 flex items-center justify-between rounded-2xl border border-white/10 shadow-2xl">
-             <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">CANLI RADAR YAYINI</span>
-             </div>
-             {flightNo && <span className="text-[10px] font-black bg-brand-gold text-brand-navy px-4 py-1.5 rounded-full shadow-lg">{flightNo.toUpperCase()} TAKİBİ</span>}
-          </div>
-          
-          <iframe 
-            key={radarKey}
-            src={flightNo 
-              ? `https://www.flightradar24.com/simple_index.php?flight=${flightNo}&z=8` 
-              : `https://www.flightradar24.com/simple_index.php?lat=41.01&lon=28.97&z=6`
-            } 
-            width="100%" 
-            height="100%" 
-            className="border-none grayscale-[0.1] contrast-[1.05]"
-            title="Live Flight Radar"
-          />
-        </div>
-
-        {/* Technical Analysis Panel */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-2xl border border-slate-100 dark:border-slate-800 h-full flex flex-col">
-            <h3 className="text-xs font-black text-brand-navy dark:text-brand-gold uppercase tracking-[0.3em] mb-8 flex items-center gap-3">
-              <Gauge size={20} className="text-indigo-500" /> TEKNİK ANALİZ RAPORU
-            </h3>
-            
-            {flightDetails ? (
-              <div className="space-y-5 animate-in zoom-in-95 duration-500">
-                {/* Havalimanı Bilgileri */}
-                <div className="grid grid-cols-1 gap-4">
-                  <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase mb-2">
-                      <PlaneTakeoff size={14} className="text-indigo-500" /> Kalkış
-                    </div>
-                    <div className="text-sm font-black text-slate-800 dark:text-white uppercase">{flightDetails.departure}</div>
-                  </div>
-                  <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase mb-2">
-                      <PlaneLanding size={14} className="text-emerald-500" /> Varış
-                    </div>
-                    <div className="text-sm font-black text-slate-800 dark:text-white uppercase">{flightDetails.arrival}</div>
-                  </div>
-                </div>
-
-                {/* Zamanlama ve Rötar */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase mb-2">
-                      <Calendar size={14} /> Planlanan
-                    </div>
-                    <div className="text-xs font-black text-brand-navy dark:text-brand-gold">{flightDetails.scheduledArrival}</div>
-                  </div>
-                  <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase mb-2">
-                      <Clock size={14} /> Tahmini
-                    </div>
-                    <div className="text-xs font-black text-brand-navy dark:text-brand-gold">{flightDetails.estimatedArrival}</div>
-                  </div>
-                </div>
-
-                {/* Uçak Tipi ve Rötar Durumu */}
-                <div className="p-5 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/20">
-                  <div className="text-[10px] font-black text-indigo-500 uppercase mb-2">Uçak Modeli</div>
-                  <div className="text-sm font-black text-indigo-700 dark:text-indigo-400 uppercase">{flightDetails.aircraftModel}</div>
-                </div>
-
-                <div className={`p-5 rounded-2xl border ${flightDetails.delayInfo.toLowerCase().includes('yok') ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-100' : 'bg-red-50 dark:bg-red-900/10 border-red-100 animate-pulse'}`}>
-                  <div className={`text-[10px] font-black uppercase mb-2 ${flightDetails.delayInfo.toLowerCase().includes('yok') ? 'text-emerald-500' : 'text-red-500'}`}>Rötar Durumu</div>
-                  <div className={`text-xs font-black ${flightDetails.delayInfo.toLowerCase().includes('yok') ? 'text-emerald-700' : 'text-red-700'}`}>{flightDetails.delayInfo}</div>
-                </div>
-
-                {/* Lojistik Notu */}
-                <div className="p-6 bg-slate-900 dark:bg-brand-navy rounded-3xl text-white shadow-xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-4 opacity-10">
-                    <Info size={48} />
-                  </div>
-                  <div className="relative z-10">
-                    <span className="text-[9px] font-black text-brand-gold uppercase tracking-[0.2em] block mb-3">Lojistik Operasyon Notu</span>
-                    <p className="text-[11px] leading-relaxed font-medium italic opacity-90">{flightDetails.logisticsNote}</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-10 opacity-30">
-                <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6">
-                  <Plane size={48} className="text-slate-400" />
-                </div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Uçuş Verisi Bekleniyor...</p>
+      <div className="flex flex-col gap-6">
+        {/* Canlı Radar Kartı */}
+        <div className="relative w-full h-[65vh] bg-slate-200 dark:bg-slate-800 rounded-[3rem] shadow-2xl overflow-hidden border-4 border-white dark:border-slate-900">
+          <div className="absolute top-6 left-6 z-10 flex flex-col gap-2">
+            <div className="px-4 py-2 bg-brand-navy/90 backdrop-blur-md text-white rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border border-white/10 shadow-2xl">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+              CANLI RADAR: {mapSource.toUpperCase()}
+            </div>
+            {flightDetails && (
+              <div className="px-4 py-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md text-brand-navy dark:text-brand-gold rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border border-brand-gold/20 shadow-xl">
+                <Plane size={12} /> {flightNo.toUpperCase()} TAKİBİ AKTİF
               </div>
             )}
           </div>
+
+          <iframe 
+            key={`${radarKey}-${mapSource}`}
+            src={getMapUrl()} 
+            width="100%" 
+            height="100%" 
+            className="border-none"
+            allow="geolocation"
+            title="Live Radar"
+          />
+
+          {loading && (
+            <div className="absolute inset-0 bg-brand-navy/20 backdrop-blur-[2px] flex items-center justify-center z-20">
+               <div className="flex flex-col items-center gap-4">
+                  <Loader2 size={64} className="text-white animate-spin" />
+                  <span className="text-white font-black text-xs tracking-widest animate-pulse">RADAR BAĞLANTISI KURULUYOR...</span>
+               </div>
+            </div>
+          )}
         </div>
+
+        {/* Bilgi Kartları - Sadece uçuş aktifse görünür */}
+        {flightDetails && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
+              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">KALKIŞ</span>
+              <div className="flex items-center gap-2 text-sm font-black text-brand-navy dark:text-white uppercase">
+                <PlaneTakeoff size={16} className="text-indigo-500" />
+                {flightDetails.departure}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
+              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">VARIŞ</span>
+              <div className="flex items-center gap-2 text-sm font-black text-brand-navy dark:text-white uppercase">
+                <PlaneLanding size={16} className="text-emerald-500" />
+                {flightDetails.arrival}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
+              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">UÇAK / TİP</span>
+              <div className="text-sm font-black text-brand-gold uppercase truncate">
+                {flightDetails.aircraftModel}
+              </div>
+            </div>
+            <div className="bg-brand-navy p-5 rounded-3xl shadow-xl flex flex-col justify-center">
+              <span className="text-[10px] font-black text-brand-gold/60 uppercase mb-1">TAHMİNİ İNİŞ</span>
+              <div className="text-lg font-black text-white flex items-center gap-2">
+                <Clock size={18} className="text-brand-gold" />
+                {flightDetails.estimatedArrival}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-center p-4">
+        <p className="text-[10px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest text-center">
+          <Info size={14} className="text-brand-gold" />
+          Radar verileri gecikmeli olabilir. Kesin bilgi için operasyon merkezini takip ediniz kanka.
+        </p>
       </div>
     </div>
   );
