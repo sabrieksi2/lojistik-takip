@@ -31,10 +31,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
   const [copied, setCopied] = useState(false);
   
-  // Seçilen günün detaylarını tutan state
   const [selectedDateDetails, setSelectedDateDetails] = useState<string | null>(null);
 
-  // --- HESAPLAMA FONKSİYONU ---
   const getStats = (days: number | 'month' | 'total') => {
     const now = new Date();
     let start: number;
@@ -94,13 +92,11 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     return Object.entries(data).map(([name, d]) => ({ name, ...d })).sort((a,b) => b.rev - a.rev);
   }, [jobs]);
 
-  // Seçili günün işleri ve TOPLANMIŞ (GRUPLANMIŞ) giderleri
   const dayDetails = useMemo(() => {
     if (!selectedDateDetails) return null;
     const dayJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === selectedDateDetails);
     const dayExps = expenses.filter(e => new Date(e.date).toISOString().split('T')[0] === selectedDateDetails);
     
-    // Giderleri tip bazında grupla
     const groupedExps: Record<string, number> = {};
     dayExps.forEach(e => {
       if (!groupedExps[e.type]) groupedExps[e.type] = 0;
@@ -156,7 +152,6 @@ select cron.schedule(
 
   return (
     <div className="space-y-8 pb-20">
-      {/* Detay Modalı */}
       {selectedDateDetails && dayDetails && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
@@ -192,7 +187,6 @@ select cron.schedule(
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                 {/* İş Listesi */}
                  <div className="space-y-4">
                     <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                       <ChevronRight size={14} className="text-brand-gold"/> YAPILAN İŞLER ({dayDetails.jobs.length})
@@ -216,7 +210,6 @@ select cron.schedule(
                     </div>
                  </div>
 
-                 {/* Toplanmış Gider Listesi */}
                  <div className="space-y-4">
                     <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                       <ChevronRight size={14} className="text-red-500"/> TOPLANMIŞ GİDERLER
@@ -246,7 +239,6 @@ select cron.schedule(
         </div>
       )}
 
-      {/* ÜST KARTLAR */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard title="GÜNLÜK KAR" stats={daily} />
         <SummaryCard title="HAFTALIK KAR" stats={weekly} />
@@ -254,7 +246,6 @@ select cron.schedule(
         <SummaryCard title="TOPLAM KAR" stats={total} />
       </div>
 
-      {/* GİDER KALEMLERİ ANALİZİ */}
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex items-center gap-3">
           <TrendingDown size={20} className="text-red-500" />
@@ -286,7 +277,6 @@ select cron.schedule(
         </div>
       </div>
 
-      {/* GÜNLÜK İŞ DAĞILIMI */}
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
           <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em] flex items-center gap-2"><Calendar size={18} className="text-indigo-500"/> GÜNLÜK İŞ DAĞILIMI</h3>
@@ -319,7 +309,6 @@ select cron.schedule(
         </div>
       </div>
 
-      {/* ÖZEL TARİH ARALIĞI */}
       <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-10">
            <div className="flex items-center gap-4">
@@ -350,7 +339,6 @@ select cron.schedule(
         </div>
       </div>
 
-      {/* FİRMA BAZLI RAPORLAMA */}
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex items-center gap-3">
           <Building2 size={20} className="text-emerald-500" />
@@ -380,7 +368,6 @@ select cron.schedule(
         </div>
       </div>
 
-      {/* SİSTEM AYARLARI */}
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <button onClick={() => setShowSettings(!showSettings)} className="w-full flex items-center justify-between p-8 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group">
           <div className="flex items-center gap-5">
@@ -430,7 +417,7 @@ select cron.schedule(
                       </div>
                       <div className="flex gap-4">
                         <span className="w-8 h-8 bg-indigo-600 text-white rounded-xl flex items-center justify-center flex-shrink-0 font-black text-sm">2</span>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 font-bold leading-relaxed"><b>Önemli:</b> Eğer daha önce saatlik bot kurduysan, Supabase Database -> Cron kısmından eski 'saatlik-lojistik-botu' görevini silmen temiz olur kanka.</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 font-bold leading-relaxed"><b>Önemli:</b> Eğer daha önce saatlik bot kurduysan, Supabase Database → Cron kısmından eski 'saatlik-lojistik-botu' görevini silmen temiz olur kanka.</p>
                       </div>
                       <button onClick={copySql} className="w-full flex items-center justify-center gap-3 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase hover:bg-indigo-700 transition-all shadow-lg active:scale-95">
                         {copied ? <Check size={18}/> : <Copy size={18}/>}
