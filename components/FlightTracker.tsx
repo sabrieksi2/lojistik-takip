@@ -1,180 +1,232 @@
 
-import React, { useState, useEffect } from 'react';
-// Added 'Clock' to the imports to fix the "Cannot find name 'Clock'" error on line 165.
-import { Search, Plane, Loader2, PlaneTakeoff, PlaneLanding, Radar, Map as MapIcon, RefreshCw, ExternalLink, Info, Gauge, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Plane, Loader2, PlaneTakeoff, PlaneLanding, Radar, ExternalLink, Info, Gauge, Clock, MessageSquare, AlertCircle, Crosshair, Navigation, Wifi, Globe, Map as MapIcon, Share2 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
-interface ParsedFlightInfo {
-  departure: string;
-  arrival: string;
-  aircraftModel: string;
-  estimatedArrival: string;
+interface FlightDetails {
+  flightNo: string;
   status: string;
+  departure: { city: string; code: string; time: string };
+  arrival: { city: string; code: string; time: string };
+  aircraft: string;
+  livePosition: string;
+  delayStatus: string;
+  logisticsNote: string;
+  sources: { title: string; uri: string }[];
 }
 
 const FlightTracker: React.FC = () => {
   const [flightNo, setFlightNo] = useState('');
   const [loading, setLoading] = useState(false);
-  const [flightDetails, setFlightDetails] = useState<ParsedFlightInfo | null>(null);
-  const [radarKey, setRadarKey] = useState(Date.now());
-  const [mapSource, setMapSource] = useState<'fr24' | 'radarbox'>('fr24');
+  const [details, setDetails] = useState<FlightDetails | null>(null);
 
-  const trackFlight = async () => {
-    const cleanFlightNo = flightNo.trim().toUpperCase();
-    if (!cleanFlightNo) return;
+  const searchFlight = async () => {
+    const cleanNo = flightNo.trim().toUpperCase();
+    if (!cleanNo) return;
     
     setLoading(true);
-    // Haritayı hemen güncellemek için key'i değiştiriyoruz
-    setRadarKey(Date.now());
-
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompt = `${cleanFlightNo} uçuş numarası için şu bilgileri kısa ve net getir: 
+      const prompt = `${cleanNo} uçuş numaralı uçağın şu anki canlı durumunu, rotasını, hızını, yüksekliğini ve iniş yapacağı havalimanındaki gate (kapı) bilgisini araştır. 
+      Ayrıca lojistik işi yapan biri için inişten sonraki süreci (tahmini boşaltma/çıkış süresi) yorumla. 
+      JSON formatında cevap ver:
       {
-        "departure": "Şehir (Havalimanı Kodu)",
-        "arrival": "Şehir (Havalimanı Kodu)",
-        "aircraftModel": "Model",
-        "estimatedArrival": "Saat",
-        "status": "Durum Özeti"
+        "flightNo": "...",
+        "status": "Havada/İndi/Rötarlı vb.",
+        "departure": { "city": "...", "code": "...", "time": "..." },
+        "arrival": { "city": "...", "code": "...", "time": "..." },
+        "aircraft": "Uçak Tipi",
+        "livePosition": "Şu an nerenin üzerinde olduğu bilgisi",
+        "delayStatus": "Rötar var mı yok mu?",
+        "logisticsNote": "Lojistikçi için operasyonel not"
       }`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3-pro-preview',
         contents: [{ parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json"
+        }
       });
 
-      const data = JSON.parse(response.text) as ParsedFlightInfo;
-      setFlightDetails(data);
+      const data = JSON.parse(response.text);
+      // Grounding verilerini (kaynakları) ekleyelim
+      const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((chunk: any) => ({
+        title: chunk.web?.title || 'Kaynak',
+        uri: chunk.web?.uri || '#'
+      })) || [];
+
+      setDetails({ ...data, sources });
     } catch (err) {
-      console.error("Flight info error:", err);
+      console.error("Flight search error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const getMapUrl = () => {
-    const cleanNo = flightNo.trim().toUpperCase();
-    if (mapSource === 'fr24') {
-      return cleanNo 
-        ? `https://www.flightradar24.com/simple?flight=${cleanNo}&z=7&label1=flight&label2=aircraft`
-        : `https://www.flightradar24.com/simple?lat=41.01&lon=28.97&z=6`;
-    } else {
-      return cleanNo
-        ? `https://www.radarbox.com/widget?flight=${cleanNo}&z=7`
-        : `https://www.radarbox.com/widget?lat=41.01&lng=28.97&z=6`;
-    }
+  const getExternalLink = (platform: 'fr24' | 'flightaware' | 'adsb') => {
+    const no = flightNo.trim().toLowerCase();
+    if (platform === 'fr24') return `https://www.flightradar24.com/flight/${no}`;
+    if (platform === 'flightaware') return `https://flightaware.com/live/flight/${no}`;
+    return `https://globe.adsbexchange.com/?callsign=${no}`;
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-700">
-      {/* Search Bar - Sticky on top */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-[2rem] shadow-2xl border border-brand-gold/20 flex flex-col md:flex-row gap-4 items-center">
-        <div className="flex-1 w-full relative group">
-          <div className="absolute left-6 top-1/2 -translate-y-1/2 text-brand-gold group-focus-within:scale-110 transition-transform">
-            <Radar size={24} className={loading ? "animate-spin" : ""} />
+    <div className="space-y-6 animate-in fade-in duration-700 max-w-6xl mx-auto pb-12">
+      {/* Search Header */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl border border-brand-gold/20">
+        <div className="flex flex-col md:flex-row gap-4 items-center">
+          <div className="flex-1 w-full relative">
+            <div className="absolute left-6 top-1/2 -translate-y-1/2 text-brand-gold">
+              <Radar size={28} className={loading ? "animate-spin" : ""} />
+            </div>
+            <input 
+              type="text" 
+              value={flightNo} 
+              onChange={(e) => setFlightNo(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && searchFlight()}
+              placeholder="Uçuş No (Örn: TK1821, PC2130...)"
+              className="w-full pl-16 pr-6 py-6 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-[1.8rem] text-2xl font-black uppercase tracking-[0.2em] focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold outline-none transition-all text-brand-navy dark:text-white"
+            />
           </div>
-          <input 
-            type="text" 
-            value={flightNo} 
-            onChange={(e) => setFlightNo(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && trackFlight()}
-            placeholder="Uçuş No (TK1234, PC456...)"
-            className="w-full pl-16 pr-6 py-5 bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-2xl text-xl font-black uppercase tracking-[0.2em] focus:ring-4 focus:ring-brand-gold/10 focus:border-brand-gold outline-none transition-all text-slate-800 dark:text-white"
-          />
-        </div>
-        
-        <div className="flex gap-2 w-full md:w-auto">
           <button 
-            onClick={trackFlight}
+            onClick={searchFlight}
             disabled={loading || !flightNo}
-            className="flex-1 md:flex-none px-10 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-2xl font-black text-sm uppercase shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+            className="w-full md:w-auto px-12 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-[1.8rem] py-6 font-black text-sm uppercase shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
           >
-            TAKİP ET
-          </button>
-          <button 
-            onClick={() => { setMapSource(mapSource === 'fr24' ? 'radarbox' : 'fr24'); setRadarKey(Date.now()); }}
-            className="p-5 bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-brand-gold rounded-2xl transition-colors"
-            title="Harita Kaynağını Değiştir"
-          >
-            <RefreshCw size={24} className={loading ? "animate-spin" : ""} />
+            {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
+            SORGULA
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        {/* Canlı Radar Kartı */}
-        <div className="relative w-full h-[65vh] bg-slate-200 dark:bg-slate-800 rounded-[3rem] shadow-2xl overflow-hidden border-4 border-white dark:border-slate-900">
-          <div className="absolute top-6 left-6 z-10 flex flex-col gap-2">
-            <div className="px-4 py-2 bg-brand-navy/90 backdrop-blur-md text-white rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border border-white/10 shadow-2xl">
-              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-              CANLI RADAR: {mapSource.toUpperCase()}
-            </div>
-            {flightDetails && (
-              <div className="px-4 py-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md text-brand-navy dark:text-brand-gold rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border border-brand-gold/20 shadow-xl">
-                <Plane size={12} /> {flightNo.toUpperCase()} TAKİBİ AKTİF
+      {details ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in slide-in-from-bottom-4 duration-500">
+          {/* Left: Main Info */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5">
+                <Plane size={150} />
               </div>
-            )}
+              
+              <div className="flex justify-between items-start mb-10">
+                <div>
+                  <h3 className="text-4xl font-black text-brand-navy dark:text-brand-gold tracking-tighter">{details.flightNo}</h3>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="px-3 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 text-[10px] font-black uppercase rounded-full tracking-widest">
+                      {details.status}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">• {details.aircraft}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">RÖTAR DURUMU</span>
+                  <div className="text-sm font-black text-red-500">{details.delayStatus}</div>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row items-center justify-between gap-8 py-8 border-y border-slate-100 dark:border-slate-800">
+                <div className="text-center md:text-left flex-1">
+                  <div className="text-3xl font-black text-slate-800 dark:text-white mb-1">{details.departure.code}</div>
+                  <div className="text-xs font-bold text-slate-500 uppercase">{details.departure.city}</div>
+                  <div className="text-[10px] font-black text-brand-gold mt-2 uppercase">KALKIŞ: {details.departure.time}</div>
+                </div>
+                
+                <div className="flex flex-col items-center gap-2 px-4">
+                  <div className="w-16 h-[2px] bg-slate-200 dark:bg-slate-700 relative">
+                    <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-brand-gold" size={16} />
+                  </div>
+                </div>
+
+                <div className="text-center md:text-right flex-1">
+                  <div className="text-3xl font-black text-slate-800 dark:text-white mb-1">{details.arrival.code}</div>
+                  <div className="text-xs font-bold text-slate-500 uppercase">{details.arrival.city}</div>
+                  <div className="text-[10px] font-black text-brand-gold mt-2 uppercase">VARİŞ: {details.arrival.time}</div>
+                </div>
+              </div>
+
+              <div className="mt-8 flex items-start gap-4 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
+                <Navigation className="text-brand-gold flex-shrink-0" size={24} />
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">GÜNCEL KONUM</span>
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-200 leading-relaxed">
+                    {details.livePosition}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Link Buttons (The fix for broken maps) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button onClick={() => window.open(getExternalLink('fr24'), '_blank')} className="flex items-center justify-between p-6 bg-brand-navy text-white rounded-[2rem] hover:scale-105 transition-all shadow-lg group">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl group-hover:bg-brand-gold transition-colors"><MapIcon size={20} className="group-hover:text-brand-navy" /></div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">FLIGHTRADAR24</span>
+                </div>
+                <ExternalLink size={14} className="opacity-40" />
+              </button>
+              <button onClick={() => window.open(getExternalLink('flightaware'), '_blank')} className="flex items-center justify-between p-6 bg-indigo-600 text-white rounded-[2rem] hover:scale-105 transition-all shadow-lg group">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl group-hover:bg-white transition-colors"><Wifi size={20} className="group-hover:text-indigo-600" /></div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">FLIGHTAWARE</span>
+                </div>
+                <ExternalLink size={14} className="opacity-40" />
+              </button>
+              <button onClick={() => window.open(getExternalLink('adsb'), '_blank')} className="flex items-center justify-between p-6 bg-slate-800 text-white rounded-[2rem] hover:scale-105 transition-all shadow-lg group">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl group-hover:bg-emerald-500 transition-colors"><Globe size={20} /></div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">ADS-B (SANSÜRSÜZ)</span>
+                </div>
+                <ExternalLink size={14} className="opacity-40" />
+              </button>
+            </div>
           </div>
 
-          <iframe 
-            key={`${radarKey}-${mapSource}`}
-            src={getMapUrl()} 
-            width="100%" 
-            height="100%" 
-            className="border-none"
-            allow="geolocation"
-            title="Live Radar"
-          />
-
-          {loading && (
-            <div className="absolute inset-0 bg-brand-navy/20 backdrop-blur-[2px] flex items-center justify-center z-20">
-               <div className="flex flex-col items-center gap-4">
-                  <Loader2 size={64} className="text-white animate-spin" />
-                  <span className="text-white font-black text-xs tracking-widest animate-pulse">RADAR BAĞLANTISI KURULUYOR...</span>
-               </div>
+          {/* Right Side: Logistics & Grounding */}
+          <div className="space-y-6">
+            <div className="bg-brand-navy p-8 rounded-[3rem] shadow-2xl border border-brand-gold/30">
+              <div className="flex items-center gap-3 mb-6">
+                <MessageSquare className="text-brand-gold" size={24} />
+                <span className="text-xs font-black text-brand-gold uppercase tracking-[0.2em]">LOJİSTİK ANALİZ</span>
+              </div>
+              <p className="text-sm font-bold text-slate-300 leading-relaxed italic border-l-4 border-brand-gold pl-4">
+                "{details.logisticsNote}"
+              </p>
             </div>
-          )}
+
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-800 shadow-sm">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">DOĞRULANMIŞ KAYNAKLAR</span>
+              <div className="space-y-3">
+                {details.sources.map((src, i) => (
+                  <a key={i} href={src.uri} target="_blank" rel="noreferrer" className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-brand-gold/10 transition-colors group">
+                    <div className="w-8 h-8 bg-white dark:bg-slate-900 rounded-lg flex items-center justify-center border border-slate-100 dark:border-slate-700 text-brand-gold">
+                      {i + 1}
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase truncate flex-1 group-hover:text-brand-gold">{src.title}</span>
+                    <ExternalLink size={12} className="text-slate-300" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center p-20 text-center bg-white dark:bg-slate-900 rounded-[3rem] border-4 border-dashed border-slate-100 dark:border-slate-800">
+           <div className="p-8 bg-slate-50 dark:bg-slate-800 rounded-full mb-6">
+              <Plane size={60} className="text-slate-300" />
+           </div>
+           <h3 className="text-xl font-black text-slate-400 uppercase tracking-widest">Sorgulama Bekleniyor</h3>
+           <p className="text-xs text-slate-400 mt-2 font-bold max-w-xs">
+             Kanka uçuş numarasını yaz, AI senin için tüm web'i tarasın ve uçağın gerçek yerini bulsun.
+           </p>
+        </div>
+      )}
 
-        {/* Bilgi Kartları - Sadece uçuş aktifse görünür */}
-        {flightDetails && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 duration-500">
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
-              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">KALKIŞ</span>
-              <div className="flex items-center gap-2 text-sm font-black text-brand-navy dark:text-white uppercase">
-                <PlaneTakeoff size={16} className="text-indigo-500" />
-                {flightDetails.departure}
-              </div>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
-              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">VARIŞ</span>
-              <div className="flex items-center gap-2 text-sm font-black text-brand-navy dark:text-white uppercase">
-                <PlaneLanding size={16} className="text-emerald-500" />
-                {flightDetails.arrival}
-              </div>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-center">
-              <span className="text-[10px] font-black text-slate-400 uppercase mb-1">UÇAK / TİP</span>
-              <div className="text-sm font-black text-brand-gold uppercase truncate">
-                {flightDetails.aircraftModel}
-              </div>
-            </div>
-            <div className="bg-brand-navy p-5 rounded-3xl shadow-xl flex flex-col justify-center">
-              <span className="text-[10px] font-black text-brand-gold/60 uppercase mb-1">TAHMİNİ İNİŞ</span>
-              <div className="text-lg font-black text-white flex items-center gap-2">
-                <Clock size={18} className="text-brand-gold" />
-                {flightDetails.estimatedArrival}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex justify-center p-4">
-        <p className="text-[10px] font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest text-center">
+      <div className="text-center pt-8 border-t border-slate-100 dark:border-slate-800">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center justify-center gap-2">
           <Info size={14} className="text-brand-gold" />
-          Radar verileri gecikmeli olabilir. Kesin bilgi için operasyon merkezini takip ediniz kanka.
+          Ücretsiz haritalar kısıtlı olduğu için Google Search ve AI tabanlı canlı sorgulama sistemi aktiftir.
         </p>
       </div>
     </div>

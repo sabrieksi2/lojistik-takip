@@ -27,14 +27,14 @@ import {
   AlertCircle,
   Edit2,
   Check,
-  PlaneTakeoff,
-  PlaneLanding,
   Settings,
   Car,
   Plus,
   Settings2,
   Square,
-  CheckSquare
+  CheckSquare,
+  PlaneTakeoff,
+  PlaneLanding
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig, TelegramLog, WorkModel } from './types';
@@ -46,7 +46,6 @@ import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 import ReportGenerator from './components/ReportGenerator';
-import FlightTracker from './components/FlightTracker';
 
 const getTimeRemaining = (date: string, time: string) => {
   const diff = new Date(`${date}T${time}`).getTime() - Date.now();
@@ -76,7 +75,7 @@ interface ManualConfig {
 }
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports' | 'flights'>('daily');
+  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports'>('daily');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [historicalDate, setHistoricalDate] = useState<string>(new Date(Date.now() - 86400000).toISOString().split('T')[0]);
   
@@ -127,23 +126,26 @@ const App: React.FC = () => {
 
   const isFirstRender = useRef(true);
 
-  // --- TELEGRAM BOT AGRESİF SAATLİK OTOMASYONU ---
+  // --- TELEGRAM BOT AGRESİF 5 SAATLİK OTOMASYONU ---
   useEffect(() => {
     if (!tgConfig.autoSend || !tgConfig.botToken || !tgConfig.chatId) return;
 
     const checkAndSendTelegram = async () => {
       const todayStr = new Date().toISOString().split('T')[0];
       const hour = new Date().getHours();
-      const slotKey = `hour_${hour}`;
+      // 5 saatte bir gönderim kontrolü (0, 5, 10, 15, 20. saatler civarı)
+      const slotIndex = Math.floor(hour / 5);
+      const slotKey = `slot5_${slotIndex}`;
+      
       if (tgLogs.some(log => log.date === todayStr && log.slot === slotKey)) return;
 
       const todayJobs = scheduledJobs.filter(j => j.date === todayStr);
-      let message = `🚀 *BK LOJİSTİK - SAATLİK DURUM*\n⏰ Rapor Saati: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
+      let message = `🚀 *BK LOJİSTİK - 5 SAATLİK ÖZET*\n⏰ Rapor Saati: ${hour}:00\n📅 Tarih: ${todayStr}\n\n`;
       
       if (todayJobs.length === 0) {
         message += `_Kanka şu an planlı bir transferin görünmüyor. İyi dinlenmeler!_ 🍀`;
       } else {
-        message += `*📅 BUGÜNKÜ PLANIN:*\n`;
+        message += `*📅 GÜNCEL PLANIN:*\n`;
         todayJobs.forEach((j, i) => {
           message += `${i+1}. ${j.passengerName} (${j.time})\n📍 ${j.from} ➡️ ${j.to}\n⏳ Kalan: ${getTimeRemaining(j.date, j.time)}\n\n`;
         });
@@ -165,7 +167,7 @@ const App: React.FC = () => {
         }
       } catch (err) { console.error("Telegram error:", err); }
     };
-    const interval = setInterval(checkAndSendTelegram, 30000); 
+    const interval = setInterval(checkAndSendTelegram, 60000); 
     return () => clearInterval(interval);
   }, [tgConfig, scheduledJobs, tgLogs]);
 
@@ -586,9 +588,6 @@ const App: React.FC = () => {
         <button onClick={() => setView('scheduled')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'scheduled' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <CalendarClock size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Tersan</span>
         </button>
-        <button onClick={() => setView('flights')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'flights' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-          <PlaneTakeoff size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Uçuş Takip</span>
-        </button>
         <button onClick={() => setView('reports')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'reports' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <FileText size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Rapor</span>
         </button>
@@ -792,8 +791,6 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-
-        {view === 'flights' && <FlightTracker />}
 
         {view === 'reports' && (
           <ReportGenerator scheduledJobs={scheduledJobs} finishedJobs={finishedJobs} fixedFees={fixedFees} setFixedFees={setFixedFees} />
