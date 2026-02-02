@@ -166,7 +166,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       `;
       await renderElementToPdf(headerHtml);
 
-      let grandTotalService = 0, grandTotalFerry = 0, grandTotalYss = 0, grandTotalMarmara = 0, grandTotalOsmangazi = 0, grandTotalParking = 0, grandTotalExtras = 0;
+      let grandTotalService = 0, grandTotalSawService = 0, grandTotalFerry = 0, grandTotalYss = 0, grandTotalMarmara = 0, grandTotalOsmangazi = 0, grandTotalParking = 0, grandTotalExtras = 0;
 
       for (const job of allRelevantJobs) {
         const model = jobConfigs[job.id] || 'ist-pickup';
@@ -174,11 +174,12 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         let costs = [];
         let subTotal = 0;
 
-        const addCost = (key: keyof Omit<ManualConfig, 'extras'>, label: string) => {
+        const addCost = (key: string, label: string) => {
           const val = Number(fixedFees[key as keyof typeof fixedFees]);
           subTotal += val;
           costs.push(`${label}: ${val} TL`);
           if (key === 'service') grandTotalService += val;
+          if (key === 'sawService') grandTotalSawService += val;
           if (key === 'ferry') grandTotalFerry += val;
           if (key === 'yss') grandTotalYss += val;
           if (key === 'marmara') grandTotalMarmara += val;
@@ -202,8 +203,11 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
             costs.push(`${extra.name || 'Ekstra'}: ${extraFee} TL`);
           });
         } else if (model === 'none') {
-          /* Add only service fee for 'none' model in reports */
           addCost('service', 'Hizmet');
+        } else if (model === 'saw') {
+          addCost('sawService', 'Hizmet (SAW)');
+          addCost('ferry', 'Gemi');
+          addCost('osmangazi', 'Osmangazi');
         } else {
           addCost('service', 'Hizmet');
           addCost('ferry', 'Gemi');
@@ -230,7 +234,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         await renderElementToPdf(jobHtml);
       }
 
-      const totalSummary = grandTotalService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking + grandTotalExtras;
+      const totalSummary = grandTotalService + grandTotalSawService + grandTotalFerry + grandTotalYss + grandTotalMarmara + grandTotalOsmangazi + grandTotalParking + grandTotalExtras;
       const vatAmount = totalSummary * 0.20;
       const grandTotalWithVat = totalSummary + vatAmount;
 
@@ -238,7 +242,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
         <div style="background-color: #f8fafc; border: 2px solid #0a192f; padding: 30px; border-radius: 15px; font-family: Arial, sans-serif; margin-top: 20px;">
           <h3 style="color: #0a192f; border-bottom: 2px solid #d4af37; padding-bottom: 12px; margin-bottom: 20px; font-size: 16pt; font-weight: 800;">GENEL HAKEDİŞ ÖZETİ</h3>
           <table style="width: 100%; border-collapse: collapse; font-size: 12pt;">
-            <tr><td style="padding: 6px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right; font-weight: bold;">${grandTotalService.toLocaleString('tr-TR')} TL</td></tr>
+            <tr><td style="padding: 6px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right; font-weight: bold;">${(grandTotalService + grandTotalSawService).toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam Gemi Geçiş Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam Kuzey Marmara Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalMarmara.toLocaleString('tr-TR')} TL</td></tr>
@@ -299,9 +303,10 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
               {isSaved ? 'KAYDEDİLDİ' : 'Birim Ücretleri Kaydet'}
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             {[
-              { id: 'service', label: 'HİZMET BEDELİ' },
+              { id: 'service', label: 'İST HİZMET' },
+              { id: 'sawService', label: 'SAW HİZMET' },
               { id: 'ferry', label: 'GEMİ ÜCRETİ' },
               { id: 'yss', label: 'YAVUZ S.S' },
               { id: 'marmara', label: 'K. MARMARA' },

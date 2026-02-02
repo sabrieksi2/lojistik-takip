@@ -96,7 +96,7 @@ const App: React.FC = () => {
 
   const [fixedFees, setFixedFees] = useState(() => {
     const saved = localStorage.getItem('bk_report_fees');
-    return saved ? JSON.parse(saved) : { service: 0, ferry: 0, yss: 0, marmara: 0, osmangazi: 0, parking: 0 };
+    return saved ? JSON.parse(saved) : { service: 0, sawService: 0, ferry: 0, yss: 0, marmara: 0, osmangazi: 0, parking: 0 };
   });
 
   const [isSyncing, setIsSyncing] = useState(false);
