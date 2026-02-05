@@ -34,7 +34,8 @@ import {
   Square,
   CheckSquare,
   PlaneTakeoff,
-  PlaneLanding
+  PlaneLanding,
+  Crosshair
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig, TelegramLog, WorkModel } from './types';
@@ -46,6 +47,7 @@ import ExpenseForm from './components/ExpenseForm';
 import StatsOverview from './components/StatsOverview';
 import ConfirmationModal from './components/ConfirmationModal';
 import ReportGenerator from './components/ReportGenerator';
+import FocusView from './components/FocusView';
 
 const getTimeRemaining = (date: string, time: string) => {
   const diff = new Date(`${date}T${time}`).getTime() - Date.now();
@@ -75,7 +77,7 @@ interface ManualConfig {
 }
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports'>('daily');
+  const [view, setView] = useState<'daily' | 'scheduled' | 'stats' | 'historical' | 'reports' | 'odak'>('daily');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [historicalDate, setHistoricalDate] = useState<string>(new Date(Date.now() - 86400000).toISOString().split('T')[0]);
   
@@ -582,6 +584,9 @@ const App: React.FC = () => {
         <button onClick={() => setView('daily')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'daily' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <LayoutDashboard size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Günlük İş</span>
         </button>
+        <button onClick={() => setView('odak')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'odak' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <Crosshair size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Odak</span>
+        </button>
         <button onClick={() => setView('historical')} className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-4 py-2 rounded-xl transition-all flex-shrink-0 ${view === 'historical' ? 'bg-brand-navy/5 dark:bg-brand-gold/10 text-brand-navy dark:text-brand-gold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <CalendarPlus size={20} /> <span className="text-[10px] md:text-sm font-bold uppercase">Geçmiş</span>
         </button>
@@ -597,6 +602,8 @@ const App: React.FC = () => {
       </nav>
 
       <main className="max-w-6xl mx-auto px-4 pt-4 md:pt-40 pb-24 md:pb-8">
+        {view === 'odak' && <FocusView jobs={jobs} />}
+        
         {(view === 'daily' || view === 'historical') && (
           <div className="flex flex-col gap-10">
             <div className="flex flex-col lg:flex-row gap-6">
