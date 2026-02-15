@@ -464,6 +464,25 @@ const App: React.FC = () => {
     triggerSync(undefined, undefined, undefined, next);
   };
 
+  const handleUpdateCompanyName = (oldName: string, newName: string) => {
+    if (!oldName || !newName || oldName === newName) return;
+
+    // 1. Günlük İşlerdeki İsimleri Güncelle
+    const nextJobs = jobs.map(j => j.company === oldName ? { ...j, company: newName } : j);
+    setJobs(nextJobs);
+
+    // 2. Planlı İşlerdeki İsimleri Güncelle
+    const nextScheduled = scheduledJobs.map(j => j.company === oldName ? { ...j, company: newName } : j);
+    setScheduledJobs(nextScheduled);
+
+    // 3. Tamamlanan İşlerdeki İsimleri Güncelle
+    const nextFinished = finishedJobs.map(j => j.company === oldName ? { ...j, company: newName } : j);
+    setFinishedJobs(nextFinished);
+
+    // Sync
+    triggerSync(nextJobs, nextScheduled, nextFinished);
+  };
+
   return (
     <div className="min-h-screen transition-colors duration-300">
       <ConfirmationModal isOpen={modalConfig.isOpen} onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))} onConfirm={modalConfig.onConfirm} title={modalConfig.title} message={modalConfig.message} confirmText={modalConfig.confirmText} type={modalConfig.type} />
@@ -817,6 +836,7 @@ const App: React.FC = () => {
             onDeleteExpense={handleDeleteExpenseAction} 
             onUpdateJob={handleUpdateJobAction} 
             onUpdateExpense={handleUpdateExpenseAction}
+            onUpdateCompanyName={handleUpdateCompanyName}
           />
         )}
       </main>

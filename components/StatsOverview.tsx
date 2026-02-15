@@ -4,8 +4,10 @@ import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig } from '../type
 import { 
   Database, ShieldCheck, Wallet, TrendingUp, TrendingDown, Building2, CalendarDays,
   ChevronDown, ChevronUp, RefreshCw, MessageCircle, CloudLightning, Info, Search, Calendar,
-  Activity, ArrowRightLeft, Copy, Check, X, MapPin, CreditCard, ChevronRight
+  Activity, ArrowRightLeft, Copy, Check, X, MapPin, CreditCard, ChevronRight, PieChart as PieChartIcon,
+  Briefcase, Clock, Edit2
 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
 interface StatsOverviewProps {
   jobs: Job[];
@@ -20,11 +22,13 @@ interface StatsOverviewProps {
   onDeleteExpense: (expense: Expense) => void;
   onUpdateJob: (job: Job) => void;
   onUpdateExpense: (expense: Expense) => void;
+  onUpdateCompanyName: (oldName: string, newName: string) => void;
 }
 
 const StatsOverview: React.FC<StatsOverviewProps> = ({ 
   jobs, expenses, dbConfig, tgConfig, 
-  onDbConfigChange, onTgConfigChange, onSyncRequest
+  onDbConfigChange, onTgConfigChange, onSyncRequest,
+  onUpdateCompanyName
 }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
@@ -32,6 +36,10 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
   const [copied, setCopied] = useState(false);
   
   const [selectedDateDetails, setSelectedDateDetails] = useState<string | null>(null);
+  const [selectedCompanyDetails, setSelectedCompanyDetails] = useState<string | null>(null);
+  
+  // State for renaming company
+  const [editingCompany, setEditingCompany] = useState<{ oldName: string, newName: string } | null>(null);
 
   const getStats = (days: number | 'month' | 'total') => {
     const now = new Date();
@@ -92,6 +100,41 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     return Object.entries(data).map(([name, d]) => ({ name, ...d })).sort((a,b) => b.rev - a.rev);
   }, [jobs]);
 
+  // Selected Company Jobs Data
+  const selectedCompanyData = useMemo(() => {
+    if (!selectedCompanyDetails) return null;
+    const companyJobs = jobs.filter(j => j.company === selectedCompanyDetails).sort((a, b) => b.timestamp - a.timestamp);
+    const totalRev = companyJobs.reduce((acc, j) => acc + j.amount, 0);
+    return {
+      name: selectedCompanyDetails,
+      jobs: companyJobs,
+      totalRev,
+      count: companyJobs.length
+    };
+  }, [selectedCompanyDetails, jobs]);
+
+  // Chart Colors (Brand Theme + Accents)
+  const CHART_COLORS = ['#0a192f', '#d4af37', '#10b981', '#6366f1', '#f43f5e', '#8b5cf6', '#f97316', '#64748b'];
+
+  const CustomPieTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      const totalRev = companyStats.reduce((acc, curr) => acc + curr.rev, 0);
+      const percent = totalRev > 0 ? ((data.rev / totalRev) * 100).toFixed(1) : 0;
+      
+      return (
+        <div className="bg-white dark:bg-slate-900 p-4 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl z-50">
+          <p className="text-xs font-black text-brand-navy dark:text-brand-gold uppercase tracking-wider mb-1">{data.name}</p>
+          <div className="flex items-end gap-2">
+             <span className="text-lg font-black text-slate-800 dark:text-slate-200">{data.rev.toLocaleString('tr-TR')} ₺</span>
+             <span className="text-xs font-bold text-slate-400 mb-1">(%{percent})</span>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   const dayDetails = useMemo(() => {
     if (!selectedDateDetails) return null;
     const dayJobs = jobs.filter(j => new Date(j.date).toISOString().split('T')[0] === selectedDateDetails);
@@ -151,7 +194,9 @@ select cron.schedule(
   );
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="space-y-8 pb-20 animate-in fade-in duration-500">
+      
+      {/* Date Details Modal */}
       {selectedDateDetails && dayDetails && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
@@ -239,6 +284,109 @@ select cron.schedule(
         </div>
       )}
 
+      {/* Rename Company Modal */}
+      {editingCompany && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2rem] p-6 shadow-2xl border border-brand-gold/30">
+              <h3 className="text-lg font-black text-brand-navy dark:text-brand-gold uppercase tracking-widest mb-4">Firma Adını Düzenle</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mb-4">
+                 "{editingCompany.oldName}" adlı firmayı yeniden adlandırıyorsun. Bu işlem geçmişteki tüm kayıtları güncelleyecektir.
+              </p>
+              <input 
+                type="text" 
+                value={editingCompany.newName} 
+                onChange={(e) => setEditingCompany({...editingCompany, newName: e.target.value})}
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none font-bold text-slate-800 dark:text-slate-100 mb-6 focus:ring-2 focus:ring-brand-gold"
+                autoFocus
+              />
+              <div className="flex gap-3">
+                 <button onClick={() => setEditingCompany(null)} className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-xl text-xs uppercase">Vazgeç</button>
+                 <button 
+                  onClick={() => {
+                    onUpdateCompanyName(editingCompany.oldName, editingCompany.newName);
+                    setEditingCompany(null);
+                  }}
+                  disabled={!editingCompany.newName || editingCompany.newName === editingCompany.oldName}
+                  className="flex-1 px-4 py-3 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black rounded-xl text-xs uppercase shadow-xl disabled:opacity-50"
+                 >
+                   Kaydet
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Company Details Modal */}
+      {selectedCompanyDetails && selectedCompanyData && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+              <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy rounded-2xl shadow-lg">
+                      <Briefcase size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-black text-brand-navy dark:text-brand-gold uppercase tracking-tighter">{selectedCompanyData.name} İŞ GEÇMİŞİ</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Bu firma ile yapılan tüm işlemlerin dökümü.</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedCompanyDetails(null)} className="p-3 bg-white dark:bg-slate-800 text-slate-400 hover:text-red-500 rounded-2xl border border-slate-100 dark:border-slate-700 transition-colors shadow-sm">
+                    <X size={24} />
+                  </button>
+              </div>
+
+              <div className="p-8 border-b border-slate-100 dark:border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="bg-indigo-50 dark:bg-indigo-900/10 p-6 rounded-3xl border border-indigo-100 dark:border-indigo-900/20 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black text-indigo-600 uppercase block mb-1">TOPLAM İŞ SAYISI</span>
+                      <span className="text-3xl font-black text-indigo-600">{selectedCompanyData.count}</span>
+                    </div>
+                    <Briefcase size={32} className="text-indigo-200 dark:text-indigo-800/30" />
+                 </div>
+                 <div className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/20 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black text-emerald-600 uppercase block mb-1">TOPLAM CİRO</span>
+                      <span className="text-3xl font-black text-emerald-600">{selectedCompanyData.totalRev.toLocaleString('tr-TR')} ₺</span>
+                    </div>
+                    <Wallet size={32} className="text-emerald-200 dark:text-emerald-800/30" />
+                 </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8">
+                 <div className="space-y-4">
+                    {selectedCompanyData.jobs.map(j => (
+                      <div key={j.id} className="p-6 bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-slate-100 dark:border-slate-700 flex flex-col md:flex-row justify-between items-center group hover:bg-white dark:hover:bg-slate-800 transition-colors shadow-sm hover:shadow-md">
+                         <div className="flex items-center gap-5 flex-1 w-full">
+                            <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-700 text-slate-400 font-black text-center min-w-[70px]">
+                               <div className="text-xl text-slate-800 dark:text-slate-200">{new Date(j.date).getDate()}</div>
+                               <div className="text-[9px] uppercase">{new Date(j.date).toLocaleDateString('tr-TR', { month: 'short' })}</div>
+                            </div>
+                            <div>
+                               <div className="text-lg font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                                 {j.from} <ArrowRightLeft size={16} className="text-slate-300"/> {j.to}
+                               </div>
+                               <div className="text-[11px] font-bold text-slate-400 mt-1 uppercase flex items-center gap-2">
+                                  <Clock size={12} /> {new Date(j.date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                                  <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
+                                  {new Date(j.date).getFullYear()}
+                               </div>
+                            </div>
+                         </div>
+                         <div className="mt-4 md:mt-0 text-2xl font-black text-brand-navy dark:text-brand-gold">
+                            {j.amount.toLocaleString('tr-TR')} ₺
+                         </div>
+                      </div>
+                    ))}
+                 </div>
+              </div>
+
+              <div className="p-8 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                 <button onClick={() => setSelectedCompanyDetails(null)} className="w-full bg-brand-navy dark:bg-brand-gold text-white dark:text-brand-navy font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-sm shadow-xl hover:brightness-110 active:scale-95 transition-all">PENCEREYİ KAPAT</button>
+              </div>
+           </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard title="GÜNLÜK KAR" stats={daily} />
         <SummaryCard title="HAFTALIK KAR" stats={weekly} />
@@ -282,9 +430,9 @@ select cron.schedule(
           <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em] flex items-center gap-2"><Calendar size={18} className="text-indigo-500"/> GÜNLÜK İŞ DAĞILIMI</h3>
           <span className="text-[10px] text-slate-400 font-bold italic">Tarihe tıklayarak o günün detaylarını görebilirsin kanka.</span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[400px] custom-scrollbar">
            <table className="w-full text-left text-xs font-bold">
-              <thead className="bg-slate-50/50 dark:bg-slate-800/30 text-slate-400 font-black uppercase">
+              <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 text-slate-400 font-black uppercase shadow-sm">
                 <tr>
                   <th className="px-8 py-5">TARİH</th>
                   <th className="px-8 py-5 text-center">İŞ ADETİ</th>
@@ -340,13 +488,16 @@ select cron.schedule(
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex items-center gap-3">
-          <Building2 size={20} className="text-emerald-500" />
-          <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em]">FİRMA BAZLI RAPORLAMA</h3>
+        <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+             <Building2 size={20} className="text-emerald-500" />
+             <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em]">FİRMA BAZLI RAPORLAMA</h3>
+          </div>
+          <span className="text-[10px] text-slate-400 font-bold italic">Detaylar için firma ismine tıkla kanka.</span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[400px] custom-scrollbar">
           <table className="w-full text-left text-xs font-bold">
-            <thead className="bg-slate-50/50 dark:bg-slate-800/30 text-slate-400 font-black uppercase">
+            <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 text-slate-400 font-black uppercase shadow-sm">
               <tr>
                 <th className="px-8 py-5">FİRMA</th>
                 <th className="px-8 py-5 text-center">ADET</th>
@@ -355,8 +506,21 @@ select cron.schedule(
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {companyStats.map(c => (
-                <tr key={c.name} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="px-8 py-6 font-black text-slate-800 dark:text-slate-100">{c.name}</td>
+                <tr key={c.name} onClick={() => setSelectedCompanyDetails(c.name)} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group">
+                  <td className="px-8 py-6 font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 group-hover:text-brand-navy dark:group-hover:text-brand-gold transition-colors">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingCompany({ oldName: c.name, newName: c.name });
+                      }}
+                      className="p-1.5 text-slate-300 hover:text-brand-navy dark:hover:text-brand-gold bg-slate-50 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all"
+                      title="Firma Adını Düzenle"
+                    >
+                       <Edit2 size={12} />
+                    </button>
+                    {c.name}
+                    <ChevronRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
+                  </td>
                   <td className="px-8 py-6 text-center">
                     <span className="px-5 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl font-black text-[11px]">{c.count}</span>
                   </td>
@@ -366,6 +530,52 @@ select cron.schedule(
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* PIE CHART MODULE */}
+      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+         <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex items-center gap-3">
+            <PieChartIcon size={20} className="text-brand-gold" />
+            <h3 className="text-[12px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-[0.15em]">FİRMA GELİR DAĞILIMI (GEOMETRİK)</h3>
+         </div>
+         <div className="p-8 flex flex-col items-center">
+            {companyStats.length > 0 ? (
+              <div className="w-full h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={companyStats}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={140}
+                      paddingAngle={5}
+                      dataKey="rev"
+                      nameKey="name"
+                      stroke="none"
+                    >
+                      {companyStats.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip content={<CustomPieTooltip />} />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      iconType="circle"
+                      formatter={(value, entry: any) => (
+                        <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase ml-1 mr-4">{value}</span>
+                      )}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="p-20 text-center text-slate-300 font-black italic tracking-widest uppercase">
+                 HENÜZ VERİ YOK
+              </div>
+            )}
+         </div>
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
