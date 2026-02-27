@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { FileText, Download, Settings2, Save, Check, MapPinned, Clock, FileType, CheckSquare, Square, Plus, Trash2, X } from 'lucide-react';
+import { FileText, Download, Settings2, Save, Check, MapPinned, Clock, FileType, CheckSquare, Square, Plus, Trash2 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { ScheduledJob } from '../types';
@@ -130,6 +130,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
     container.style.left = '-9999px';
     container.style.width = '800px';
     container.style.backgroundColor = '#ffffff';
+    container.style.color = '#000000'; // Enforce black text color to prevent dark mode inheritance
     document.body.appendChild(container);
 
     const renderElementToPdf = async (html: string) => {
@@ -171,7 +172,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       for (const job of allRelevantJobs) {
         const model = jobConfigs[job.id] || 'ist-pickup';
         const dateFormatted = new Date(job.date).toLocaleDateString('tr-TR');
-        let costs = [];
+        let costs: string[] = [];
         let subTotal = 0;
 
         const addCost = (key: string, label: string) => {
@@ -241,7 +242,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ scheduledJobs, finish
       const summaryHtml = `
         <div style="background-color: #f8fafc; border: 2px solid #0a192f; padding: 30px; border-radius: 15px; font-family: Arial, sans-serif; margin-top: 20px;">
           <h3 style="color: #0a192f; border-bottom: 2px solid #d4af37; padding-bottom: 12px; margin-bottom: 20px; font-size: 16pt; font-weight: 800;">GENEL HAKEDİŞ ÖZETİ</h3>
-          <table style="width: 100%; border-collapse: collapse; font-size: 12pt;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 12pt; color: #0a192f;">
             <tr><td style="padding: 6px 0;">Toplam Hizmet Bedeli</td><td style="text-align: right; font-weight: bold;">${(grandTotalService + grandTotalSawService).toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam Gemi Geçiş Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalFerry.toLocaleString('tr-TR')} TL</td></tr>
             <tr><td style="padding: 6px 0;">Toplam YSS Köprü Ücreti</td><td style="text-align: right; font-weight: bold;">${grandTotalYss.toLocaleString('tr-TR')} TL</td></tr>

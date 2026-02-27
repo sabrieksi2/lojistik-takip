@@ -5,14 +5,11 @@ import {
   CalendarClock, 
   Wallet, 
   TrendingUp, 
-  Fuel, 
   MapPin, 
   ArrowRightLeft,
   Trash2,
   History,
   CalendarPlus,
-  Cloud,
-  CloudOff,
   RefreshCw,
   Moon,
   Sun,
@@ -20,14 +17,9 @@ import {
   FileText,
   CheckCircle,
   Bell,
-  Send,
-  MessageCircle,
-  Clock,
   X,
-  AlertCircle,
   Edit2,
   Check,
-  Settings,
   Car,
   Plus,
   Settings2,
@@ -102,7 +94,7 @@ const App: React.FC = () => {
   });
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [, setLastSync] = useState<string | null>(null);
   const [isCloudActive, setIsCloudActive] = useState(false);
   const [syncFlash, setSyncFlash] = useState(false);
 

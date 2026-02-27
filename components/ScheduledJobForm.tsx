@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Calendar, User, MapPin, Clock, CreditCard, Building2, ChevronDown } from 'lucide-react';
+import { Calendar, User, MapPin, CreditCard, Building2, ChevronDown } from 'lucide-react';
 
 interface ScheduledJobFormProps {
   onAdd: (job: { company: string; passengerName: string; from: string; to: string; fee: number; date: string; time: string }) => void;

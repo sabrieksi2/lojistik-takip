@@ -2,9 +2,9 @@
 import React, { useMemo, useState } from 'react';
 import { Job, ScheduledJob, Expense, ExpenseType, TelegramConfig } from '../types';
 import { 
-  Database, ShieldCheck, Wallet, TrendingUp, TrendingDown, Building2, CalendarDays,
+  Database, ShieldCheck, Wallet, TrendingDown, Building2,
   ChevronDown, ChevronUp, RefreshCw, MessageCircle, CloudLightning, Info, Search, Calendar,
-  Activity, ArrowRightLeft, Copy, Check, X, MapPin, CreditCard, ChevronRight, PieChart as PieChartIcon,
+  ArrowRightLeft, Copy, Check, X, MapPin, CreditCard, ChevronRight, PieChart as PieChartIcon,
   Briefcase, Clock, Edit2
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
@@ -554,7 +554,7 @@ select cron.schedule(
                       nameKey="name"
                       stroke="none"
                     >
-                      {companyStats.map((entry, index) => (
+                      {companyStats.map((_, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Pie>
@@ -563,7 +563,7 @@ select cron.schedule(
                       verticalAlign="bottom" 
                       height={36}
                       iconType="circle"
-                      formatter={(value, entry: any) => (
+                      formatter={(value, _: any) => (
                         <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase ml-1 mr-4">{value}</span>
                       )}
                     />

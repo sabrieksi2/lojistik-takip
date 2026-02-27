@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Search, Plane, Loader2, PlaneTakeoff, PlaneLanding, Radar, ExternalLink, Info, Gauge, Clock, MessageSquare, AlertCircle, Crosshair, Navigation, Wifi, Globe, Map as MapIcon, Share2 } from 'lucide-react';
+import { Search, Plane, Loader2, Radar, ExternalLink, Info, MessageSquare, Navigation, Wifi, Globe, Map as MapIcon } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
 interface FlightDetails {
@@ -50,7 +50,9 @@ const FlightTracker: React.FC = () => {
         }
       });
 
-      const data = JSON.parse(response.text);
+      const text = response.text;
+      if (!text) throw new Error("No response text");
+      const data = JSON.parse(text);
       // Grounding verilerini (kaynakları) ekleyelim
       const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((chunk: any) => ({
         title: chunk.web?.title || 'Kaynak',

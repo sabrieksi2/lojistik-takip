@@ -6,7 +6,6 @@ import {
   Target, 
   Zap, 
   TrendingUp, 
-  Activity, 
   Calendar as CalendarIcon, 
   Sparkles,
   Award
